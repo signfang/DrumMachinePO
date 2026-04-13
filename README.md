@@ -19,7 +19,7 @@ It adds the following features on top of the DrumMachine example:
 
 **Grid view - Pattern editor**
 
-![alt text](DrumMachinePO/Grid.gif "grid")
+![alt text](Grid.gif "grid")
 
 
 Control info:
@@ -33,7 +33,7 @@ Crank:
 - Hold B + crank: change Swing amount
 
 **Patterns/Settings view**
-![alt text](DrumMachinePO/Settings.gif "Settings")
+![alt text](Settings.gif "Settings")
 
 You can access the patterns/settings menu via Playdate System menu.
 
