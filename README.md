@@ -68,6 +68,8 @@ This is equivalent of Pocket Operator sync mode 2. (SY2)
 
 Since there are no "stereo in" in Playdate, Playdate should be the first one in the chain.
 
+You can access the Sync mode by holding "Function" key and pressing "BPM" key on your Pocket Operator.
+
 Sync mode of Pocket Operators work like the following (from https://www.reddit.com/r/pocketoperators/comments/4h3l8k/sync_modes_explained/):
 
 
@@ -90,6 +92,7 @@ SY3  sync  mono/sync
 
 As the sync signal is just a mono sound, if the volume is too low it might not get detected by the Pocket Operators.
 
+Also, SY4/SY5 only appears when you ​connect the line-in cable to the PO.
 
 **License info**
 
