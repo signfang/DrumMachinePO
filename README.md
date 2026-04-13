@@ -1,6 +1,6 @@
 **DrumMachinePO**
 
-Simple 16-step sequencer with multi-pattern chaining and Teenage Engineering Pocket Operator sync ability.
+A simple 16-step sequencer with multi-pattern chaining and Teenage Engineering Pocket Operator sync ability.
 
 ![alt text](DrumMachinePO/Source/images/card.png "title")
 
@@ -60,11 +60,11 @@ B: Go back to grid view/delete the pattern chain, or hold to clear pattern.
 
 **Syncing with Pocket Operator**
 
-When Sync mode enabled, DrumMachinePO shifts all the drum sounds to the right channel. 
+When Sync mode is enabled, DrumMachinePO shifts all the drum sounds to the right channel. 
 
 Left channel is reserved for sync signal, which is just a click sound that fires 1,3,5,7... steps.
 
-This is equivalent of Pocket Operator sync mode 2. (SY2)
+This is equivalent of Pocket Operator sync mode 1. (SY1)
 
 Since there are no "stereo in" in Playdate, Playdate should be the first one in the chain.
 
@@ -78,9 +78,9 @@ mode  input  output
 
 SY0	  stereo  stereo
 
-SY1  stereo  mono/sync
+**SY1  stereo  mono/sync** --> Playdate runs in this mode
 
-**SY2  sync  stereo** --> Playdate runs in this mode
+SY2  sync  stereo
 
 SY3  sync  mono/sync
 
