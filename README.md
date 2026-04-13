@@ -1,4 +1,6 @@
-**DrumMachinePO - simple 16-step sequencer with multi-pattern chaining and Teenage Engineering Pocket Operator sync ability.**
+**DrumMachinePO**
+
+Simple 16-step sequencer with multi-pattern chaining and Teenage Engineering Pocket Operator sync ability.
 
 ![alt text](DrumMachinePO/Source/images/card.png "title")
 
@@ -8,10 +10,10 @@ DrumMachinePO is an enhanced version of Playdate SDK example - DrumMachine - whi
 
 It adds the following features on top of the DrumMachine example:
 1. Save/Load project
-2. Multi-pattern (up to 8). Use crank in Grid mode, or go to pattern/settings menu.
+2. Multi-pattern (up to 8). 
 3. Pattern chaining.
-4. BPM/Swing adjustment (Hold A/B+crank on the grid view)
-5. Teenage Engineering Pocket Operator (e.g. PO-33 KO!) sync ability.
+4. BPM/Swing adjustment 
+5. Pocket Operator (e.g. PO-33 KO!) sync ability.
 
 
 
@@ -31,8 +33,11 @@ Use https://play.date/account/sideload/ page for zip file, and use usb connectio
 Control info:
 
 D-PAD: Move around the grid. 
+
 A: Add/remove note. Hold A+up/down to adjust velocity of each notes. If the focus is on the track name (e.g. "KickDrum"), the A-button press will mute the selected track.
+
 B: Start/Stop playing.
+
 Crank: 
 - No modifier: change the pattern
 - Hold A + crank: change BPM
@@ -45,8 +50,11 @@ Crank:
 You can access the patterns/settings menu via Playdate System menu.
 
 Control info:
+
 D-PAD: Move around the settings. "up" toggles the chain mode on/off when the highlight is at the top.
+
 A: Select options, or hold to copy pattern (cursor should be on the source pattern. While holding A, press left/right to desired destination patterns)
+
 B: Go back to grid view/delete the pattern chain, or hold to clear pattern.
 
 
