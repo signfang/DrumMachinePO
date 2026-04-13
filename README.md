@@ -1,6 +1,6 @@
 **DrumMachinePO - simple 16-step sequencer with multi-pattern chaining and Teenage Engineering Pocket Operator sync ability.**
 
-![alt text](https://github.com/signfang/DrumMachinePO/DrumMachinePO/Source/images/card.png "title")
+![alt text](DrumMachinePO/Source/images/card.png "title")
 
 
 DrumMachinePO is an enhanced version of Playdate SDK example - DrumMachine - which is just a single-pattern 16-step sequencer. 
