@@ -58,6 +58,30 @@ A: Select options, or hold to copy pattern (cursor should be on the source patte
 B: Go back to grid view/delete the pattern chain, or hold to clear pattern.
 
 
+**Syncing with Pocket Operator**
+
+When Sync mode enabled, DrumMachinePO shifts all the drum sounds to the right channel. 
+
+Left channel is reserved for sync signal, which is just a click sound that fires 1,3,5,7... steps.
+
+This is equivalent of Pocket Operator sync mode 2. (SY2)
+
+Since there are no "stereo in" in Playdate, Playdate should be the first one in the chain.
+
+Sync mode of Pocket Operators work like the following (from https://www.reddit.com/r/pocketoperators/comments/4h3l8k/sync_modes_explained/):
+
+mode	input	output
+SY0	stereo	stereo
+SY1	stereo	mono/sync
+**SY2	sync	stereo** --> Playdate runs in this mode
+SY3	sync	mono/sync
+**SY4	mono/sync	stereo** --> Pocket Operator should be in this mode, **if it's the last one** in the Sync Chain.
+**SY5	mono/sync	mono/sync** --> Pocket Operator should be in this mode, **if it's in the middle** of the Sync Chain.
+
+
+As the sync signal is just a mono sound, if the volume is too low it might not get detected by the Pocket Operators.
+
+
 **License info**
 
 Original SDK example of DrumMachine was distributed in 0BSD license. 
