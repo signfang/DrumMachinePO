@@ -70,12 +70,20 @@ Since there are no "stereo in" in Playdate, Playdate should be the first one in 
 
 Sync mode of Pocket Operators work like the following (from https://www.reddit.com/r/pocketoperators/comments/4h3l8k/sync_modes_explained/):
 
-mode	input	output
+
+
+**mode	input	output**
+
 SY0	stereo	stereo
+
 SY1	stereo	mono/sync
+
 **SY2	sync	stereo** --> Playdate runs in this mode
+
 SY3	sync	mono/sync
+
 **SY4	mono/sync	stereo** --> Pocket Operator should be in this mode, **if it's the last one** in the Sync Chain.
+
 **SY5	mono/sync	mono/sync** --> Pocket Operator should be in this mode, **if it's in the middle** of the Sync Chain.
 
 
