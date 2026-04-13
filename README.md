@@ -15,6 +15,12 @@ It adds the following features on top of the DrumMachine example:
 
 
 
+**How to install**
+
+Download the "drummachinepo.pdx" folder or "drummachinepo.pdx.zip" file, then sideload it into the Playdate console. 
+
+Use https://play.date/account/sideload/ page for zip file, and use usb connection to sideload the program directly to Games folder.
+
 
 
 **Grid view - Pattern editor**
