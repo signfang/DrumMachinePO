@@ -6,14 +6,21 @@
 DrumMachinePO is an enhanced version of Playdate SDK example - DrumMachine - which is just a single-pattern 16-step sequencer. 
 
 
-It adds the following features:
+It adds the following features on top of the DrumMachine example:
 1. Save/Load project
 2. Multi-pattern (up to 8). Use crank in Grid mode, or go to pattern/settings menu.
 3. Pattern chaining.
 4. BPM/Swing adjustment (Hold A/B+crank on the grid view)
 5. Teenage Engineering Pocket Operator (e.g. PO-33 KO!) sync ability.
 
+
+
+
+
 **Grid view - Pattern editor**
+
+![alt text](DrumMachinePO/Grid.gif "grid")
+
 
 Control info:
 
@@ -25,6 +32,15 @@ Crank:
 - Hold A + crank: change BPM
 - Hold B + crank: change Swing amount
 
+**Patterns/Settings view**
+![alt text](DrumMachinePO/Settings.gif "Settings")
+
+You can access the patterns/settings menu via Playdate System menu.
+
+Control info:
+D-PAD: Move around the settings. "up" toggles the chain mode on/off when the highlight is at the top.
+A: Select options, or hold to copy pattern (cursor should be on the source pattern. While holding A, press left/right to desired destination patterns)
+B: Go back to grid view/delete the pattern chain, or hold to clear pattern.
 
 
 **License info**
