@@ -33,6 +33,7 @@ Crank:
 - Hold B + crank: change Swing amount
 
 **Patterns/Settings view**
+
 ![alt text](Settings.gif "Settings")
 
 You can access the patterns/settings menu via Playdate System menu.
