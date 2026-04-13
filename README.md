@@ -72,19 +72,20 @@ Sync mode of Pocket Operators work like the following (from https://www.reddit.c
 
 
 
-**mode	input	output**
+mode  input  output
 
-SY0	stereo	stereo
+SY0	  stereo  stereo
 
-SY1	stereo	mono/sync
+SY1  stereo  mono/sync
 
-**SY2	sync	stereo** --> Playdate runs in this mode
+**SY2  sync  stereo** --> Playdate runs in this mode
 
-SY3	sync	mono/sync
+SY3  sync  mono/sync
 
-**SY4	mono/sync	stereo** --> Pocket Operator should be in this mode, **if it's the last one** in the Sync Chain.
+**SY4  mono/sync  stereo** --> Pocket Operator should be in this mode, **if it's the last one** in the Sync Chain.
 
-**SY5	mono/sync	mono/sync** --> Pocket Operator should be in this mode, **if it's in the middle** of the Sync Chain.
+**SY5  mono/sync  mono/sync** --> Pocket Operator should be in this mode, **if it's in the middle** of the Sync Chain.
+
 
 
 As the sync signal is just a mono sound, if the volume is too low it might not get detected by the Pocket Operators.
