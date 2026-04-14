@@ -14,6 +14,7 @@ It adds the following features on top of the DrumMachine example:
 3. Pattern chaining.
 4. BPM/Swing adjustment 
 5. Pocket Operator (e.g. PO-33 KO!) sync ability.
+6. User-defined samples (instead of built-in sounds, must be done while connected to PC)
 
 
 
@@ -56,6 +57,19 @@ D-PAD: Move around the settings. "up" toggles the chain mode on/off when the hig
 A: Select options, or hold to copy pattern (cursor should be on the source pattern. While holding A, press left/right to desired destination patterns)
 
 B: Go back to grid view/delete the pattern chain, or hold to clear pattern.
+
+
+
+**Using user samples**
+
+DrumMachinPO looks for the user sample files when starting up. 
+
+Put sample files in Shared/Samples folder to use it instead of the built-in ones.
+
+Sample names should match the ones in the following list (+ extensions. wav/aiff/mp3 are supported).
+
+'KickDrum', 'SnareDrum', 'HHClosed', 'HHOpen', 'TomHi', 'TomMid', 'TomLow', 'Clap', 'Clav', 'Rimshot', 'Cowbell', 'Maraca', 'CongaHi', 'CongaMid', 'CongaLow'
+
 
 
 **Syncing with Pocket Operator**
