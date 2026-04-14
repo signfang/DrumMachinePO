@@ -1,6 +1,0 @@
-name=DrumMachinePO
-author=signfang
-description=Multi-pattern drum machine with Pocket Operator sync abilty
-bundleID=com.signfang.drumspo
-imagePath=images/card.png
-version=0.1
