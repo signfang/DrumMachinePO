@@ -355,7 +355,7 @@ local crankAccum = 0    -- shared accumulator for all crank modes
 
 -- Pattern UI state
 selectedPatternSlot = 1   -- 1..MAX_PATTERNS
-patternUIRow        = 1   -- 1=pattern row, 2=chain row, 3=save/load, 4=PO sync
+patternUIRow        = 1   -- 1=pattern row, 3=chain row, 4=save/load, 4=PO sync
 selectedChainSlot   = 1   -- 1..#chainList+1  (+1 = the "add" slot)
 
 -- Pattern copy state
@@ -463,11 +463,16 @@ local function drawPatternUI()
 
 	-- Chain section label
 	gfx.setColor(gfx.kColorBlack)
+	if patternUIRow == 2 then
+		gfx.setLineWidth(3)
+		gfx.drawRect(PAT_START_X - 2, PAT_CHAIN_LABEL_Y - 2, 120, 16)
+		gfx.setLineWidth(1)
+	end
 	gfx.drawText("CHAIN: " .. (chainEnabled and "ON " or "OFF"), PAT_START_X, PAT_CHAIN_LABEL_Y)
 
 	-- [>] play-all button  (selectedChainSlot == 0)
 	local PLAY_W = 28
-	local isPlaySel = (patternUIRow == 2 and selectedChainSlot == 0)
+	local isPlaySel = (patternUIRow == 3 and selectedChainSlot == 0)
 	gfx.setColor(gfx.kColorBlack)
 	gfx.setLineWidth(isPlaySel and 3 or 1)
 	gfx.drawRect(PAT_START_X, PAT_CHAIN_ROW_Y, PLAY_W, 20)
@@ -481,7 +486,7 @@ local function drawPatternUI()
 
 	for ci = 1, #chainList do
 		local x = slotOffX + (ci - 1) * (SLOT_W + SLOT_GAP)
-		local isSelected = (patternUIRow == 2 and ci == selectedChainSlot)
+		local isSelected = (patternUIRow == 3 and ci == selectedChainSlot)
 		gfx.setColor(gfx.kColorBlack)
 		gfx.setLineWidth(isSelected and 3 or 1)
 		gfx.drawRect(x, PAT_CHAIN_ROW_Y, SLOT_W, 20)
@@ -491,7 +496,7 @@ local function drawPatternUI()
 
 	-- "+" append slot
 	local addX     = slotOffX + #chainList * (SLOT_W + SLOT_GAP)
-	local isAddSel = (patternUIRow == 2 and selectedChainSlot == #chainList + 1)
+	local isAddSel = (patternUIRow == 3 and selectedChainSlot == #chainList + 1)
 	gfx.setColor(gfx.kColorBlack)
 	gfx.setLineWidth(isAddSel and 3 or 1)
 	gfx.drawRect(addX, PAT_CHAIN_ROW_Y, SLOT_W, 20)
@@ -500,10 +505,10 @@ local function drawPatternUI()
 	
 
 
-	-- SAVE/LOAD slot row  (patternUIRow == 3)
+	-- SAVE/LOAD slot row  (patternUIRow == 4)
 	gfx.setColor(gfx.kColorBlack)
 	local saveText = "PROJECT SLOT: " .. currentSaveSlot .. " / " .. MAX_SAVE_SLOTS
-	if patternUIRow == 3 then
+	if patternUIRow == 4 then
 		gfx.setLineWidth(3)
 		gfx.drawRect(PAT_START_X - 2, PAT_SAVE_SLOT_ROW_Y - 2, 220, 16)
 		gfx.setLineWidth(1)
@@ -515,7 +520,7 @@ local function drawPatternUI()
 	-- test
 	gfx.drawText("SAVE PROJECT", PAT_START_X, PAT_SAVE_ROW_Y)
 	
-	if patternUIRow == 4 then
+	if patternUIRow == 5 then
 		gfx.setLineWidth(3)
 		gfx.drawRect(PAT_START_X - 2, PAT_SAVE_ROW_Y - 2, 120, 16)
 		gfx.setLineWidth(1)
@@ -523,7 +528,7 @@ local function drawPatternUI()
 	
 	gfx.drawText("LOAD PROJECT", PAT_START_X, PAT_LOAD_ROW_Y)
 	
-	if patternUIRow == 5 then
+	if patternUIRow == 6 then
 		gfx.setLineWidth(3)
 		gfx.drawRect(PAT_START_X - 2, PAT_LOAD_ROW_Y - 2, 120, 16)
 		gfx.setLineWidth(1)
@@ -532,7 +537,7 @@ local function drawPatternUI()
 	-- PO SYNC row  (patternUIRow == 6)
 	gfx.setColor(gfx.kColorBlack)
 	local syncText = "PO SYNC: " .. (poSyncEnabled and "ON" or "OFF")
-	if patternUIRow == 6 then
+	if patternUIRow == 7 then
 		gfx.setLineWidth(3)
 		gfx.drawRect(PAT_START_X - 2, PAT_PO_SYNC_Y - 2, 150, 16)
 		gfx.setLineWidth(1)
@@ -550,9 +555,12 @@ local function drawPatternUI()
 			gfx.drawText("Release A to paste  |  src: P" .. (patternCopySource or "?"), PAT_START_X, PAT_HELP2_Y)
 		else
 			gfx.drawText("A:load / Hold A 1s:copy / Hold B 1s:clear", PAT_START_X, PAT_HELP1_Y)
-			gfx.drawText("Down:chain / Up:toggle chain / Crank:BPM", PAT_START_X, PAT_HELP2_Y)
+			gfx.drawText("Down:chain / Crank:BPM", PAT_START_X, PAT_HELP2_Y)
 		end
 	elseif patternUIRow == 2 then
+		gfx.drawText("A: toggle chain mode", PAT_START_X, PAT_HELP1_Y)
+		gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
+	elseif patternUIRow == 3 then
 		if selectedChainSlot == 0 then
 			gfx.drawText("A: PLAY ALL from start", PAT_START_X, PAT_HELP1_Y)
 		elseif selectedChainSlot == #chainList + 1 then
@@ -561,19 +569,19 @@ local function drawPatternUI()
 			gfx.drawText("A:set slot / B:del slot", PAT_START_X, PAT_HELP1_Y)
 		end
 		gfx.drawText("L/R:move / Crank:change val / Up:pats", PAT_START_X, PAT_HELP2_Y)
-	elseif patternUIRow == 3 then
+	elseif patternUIRow == 4 then
 		gfx.drawText("L/R: change slot", PAT_START_X, PAT_HELP1_Y)
 		gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
 	
 	
-	elseif patternUIRow == 4 then
+	elseif patternUIRow == 5 then
 		gfx.drawText("A: save", PAT_START_X, PAT_HELP1_Y)
 		gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
-	elseif patternUIRow == 5 then
+	elseif patternUIRow == 6 then
 		gfx.drawText("A: load", PAT_START_X, PAT_HELP1_Y)
 		gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
 	
-	elseif patternUIRow == 6 then
+	elseif patternUIRow == 7 then
 		gfx.drawText("A: toggle PO sync (SY1 equiv.)", PAT_START_X, PAT_HELP1_Y)
 		gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
 	end
@@ -1192,8 +1200,13 @@ local function patternModeA()
 		switchToPattern(selectedPatternSlot)
 		drawGrid()
 		return
-
 	elseif patternUIRow == 2 then
+		-- CHAIN TOGGLE
+		chainEnabled = not chainEnabled
+		chainStep = 1
+		drawGrid()
+		return
+	elseif patternUIRow == 3 then
 		-- Chain row
 		bUsedToExitPtn = true
 		if selectedChainSlot == 0 then
@@ -1223,7 +1236,7 @@ local function patternModeA()
 			return
 		end
 
-	elseif patternUIRow == 4 then
+	elseif patternUIRow == 5 then
 		-- SAVE: confirm before overwriting
 		local slot = currentSaveSlot
 		showDialog("Save to slot " .. slot .. "?", function(confirmed)
@@ -1236,7 +1249,7 @@ local function patternModeA()
 		drawGrid()
 		return
 
-	elseif patternUIRow == 5 then
+	elseif patternUIRow == 6 then
 		-- LOAD: confirm before discarding unsaved changes
 		local slot = currentSaveSlot
 		showDialog("Load slot " .. slot .. "? Unsaved changes lost.", function(confirmed)
@@ -1251,7 +1264,7 @@ local function patternModeA()
 		return
 	
 
-	elseif patternUIRow == 6 then
+	elseif patternUIRow == 7 then
 		-- PO SYNC TOGGLE
 		poSyncEnabled = not poSyncEnabled
 		updatePOSyncTrack()
@@ -1273,8 +1286,8 @@ local function patternModeB()
 		return
 	end
 
-	-- Row 2: delete selected chain slot; otherwise fall through to back-to-grid
-	if patternUIRow == 2 and selectedChainSlot > 0 and selectedChainSlot <= #chainList then
+	-- Row 3: delete selected chain slot; otherwise fall through to back-to-grid
+	if patternUIRow == 3 and selectedChainSlot > 0 and selectedChainSlot <= #chainList then
 		if #chainList > 1 then
 			table.remove(chainList, selectedChainSlot)
 			if selectedChainSlot > #chainList then selectedChainSlot = #chainList end
@@ -1301,9 +1314,9 @@ function playdate.leftButtonDown()
 	if uiMode == "pattern" then
 		if patternUIRow == 1 then
 			if selectedPatternSlot > 1 then selectedPatternSlot = selectedPatternSlot - 1 end
-		elseif patternUIRow == 3 then
+		elseif patternUIRow == 4 then
 			if currentSaveSlot > 1 then currentSaveSlot = currentSaveSlot - 1 end
-		elseif patternUIRow == 2 then
+		elseif patternUIRow == 3 then
 			if selectedChainSlot > 0 then selectedChainSlot = selectedChainSlot - 1 end
 		end
 		drawGrid()
@@ -1322,9 +1335,9 @@ function playdate.rightButtonDown()
 	if uiMode == "pattern" then
 		if patternUIRow == 1 then
 			if selectedPatternSlot < MAX_PATTERNS then selectedPatternSlot = selectedPatternSlot + 1 end
-		elseif patternUIRow == 3 then
+		elseif patternUIRow == 4 then
 			if currentSaveSlot < MAX_SAVE_SLOTS then currentSaveSlot = currentSaveSlot + 1 end
-		elseif patternUIRow == 2 then
+		elseif patternUIRow == 3 then
 			if selectedChainSlot < #chainList + 1 then selectedChainSlot = selectedChainSlot + 1 end
 		end
 		drawGrid()
@@ -1344,10 +1357,10 @@ function playdate.upButtonDown()
 	if uiMode == "pattern" then
 		if patternUIRow > 1 then
 			patternUIRow -= 1
-		else
+		--else
 			-- keep your existing chain toggle here
-			chainEnabled = not chainEnabled
-			chainStep = 1
+		--	chainEnabled = not chainEnabled
+		--	chainStep = 1
 		end
 		drawGrid()
 		return
@@ -1372,7 +1385,7 @@ end
 function playdate.downButtonDown()
 	if dialogMessage ~= nil then return end
 	if uiMode == "pattern" then
-		if patternUIRow < 6 then
+		if patternUIRow < 7 then
 			patternUIRow += 1
 		end
 		drawGrid()
@@ -1406,8 +1419,8 @@ function playdate.AButtonDown()
 		-- Row 1: hold timer runs in update(); tap handled in AButtonUp.
 		-- Row 4 (save) and Row 5 (load): open a dialog, so also deferred to AButtonUp.
 		local deferToUp = patternUIRow == 1
-			or patternUIRow == 4
 			or patternUIRow == 5
+			or patternUIRow == 6
 			or (patternUIRow == 2 and selectedChainSlot == 0)  -- [>] deferred
 		if deferToUp then
 			patternAHoldFrames = 0
@@ -1456,9 +1469,9 @@ function playdate.AButtonUp()
 				end
 				patternAHoldFrames = 0
 			end
-		elseif patternUIRow == 4 or patternUIRow == 5 then
+		elseif patternUIRow == 5 or patternUIRow == 6 then
 			patternModeA()
-		elseif patternUIRow == 2 and selectedChainSlot == 0 then
+		elseif patternUIRow == 3 and selectedChainSlot == 0 then
 			patternModeA()   
 		end
 		return
@@ -1577,7 +1590,7 @@ function playdate.cranked(change, _)
 			if math.abs(crankAccum) >= 20 then				
 				local dir = crankAccum > 0 and 1 or -1
 				crankAccum = 0
-				swingAmount = math.max(0.0, math.min(0.75, swingAmount + dir * 0.05))
+				swingAmount = math.max(0.0, math.min(0.75, swingAmount + dir * 0.01))
 				bSwingUsed = true
 				applySwingToAllTracks()
 				drawGrid()
@@ -1587,7 +1600,7 @@ function playdate.cranked(change, _)
 			if math.abs(crankAccum) >= 10 then				
 				local dir = crankAccum > 0 and 1 or -1
 				crankAccum = 0
-				bpmValue = math.max(60, math.min(300, bpmValue + dir))
+				bpmValue = math.max(10, math.min(300, bpmValue + dir))
 				aBPMUsed = true
 				setBPM(bpmValue)
 				drawGrid()
@@ -1620,7 +1633,7 @@ function playdate.cranked(change, _)
 			btnHoldAdj = true
 			local dir = crankAccum > 0 and 1 or -1
 			crankAccum = 0
-			if patternUIRow == 2 and selectedChainSlot >= 1 and selectedChainSlot <= #chainList then
+			if patternUIRow == 3 and selectedChainSlot >= 1 and selectedChainSlot <= #chainList then
 				local v = math.max(1, math.min(MAX_PATTERNS, chainList[selectedChainSlot] + dir))
 				chainList[selectedChainSlot] = v
 			else
