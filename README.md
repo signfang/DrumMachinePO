@@ -37,7 +37,8 @@ D-PAD: Move around the grid.
 
 A: Add/remove note. Hold A+up/down to adjust velocity of each notes. If the focus is on the track name (e.g. "KickDrum"), the A-button press will mute the selected track.
 
-B: Start/Stop playing.
+B: Start/Stop playing. Double-tapping B while it's playing makes the play head go all the way to the first position.
+
 
 Crank: 
 - No modifier: change the pattern
@@ -52,7 +53,7 @@ You can access the patterns/settings menu via Playdate System menu.
 
 Control info:
 
-D-PAD: Move around the settings. "up" toggles the chain mode on/off when the highlight is at the top.
+D-PAD: Move around the settings. 
 
 A: Select options, or hold to copy pattern (cursor should be on the source pattern. While holding A, press left/right to desired destination patterns)
 
