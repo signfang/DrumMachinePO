@@ -66,6 +66,8 @@ end
 
 local btnHoldAdj = false
 local bUsedToExitPtn = false
+local lastBTapTime = 0
+local DOUBLE_TAP_MS = 300
 
 -- Apply a track's volume/muted state to its synth.
 -- Base synth volume is 0.2; per-track volume scales on top.
@@ -1506,6 +1508,7 @@ function playdate.BButtonDown()
 	drawGrid()       -- immediately show "SWING: x%" in status bar
 end
 
+
 function playdate.BButtonUp()
 	if uiMode == "pattern" then
 		-- Only fire the tap action if neither the hold nor a dialog consumed this press
@@ -1520,22 +1523,33 @@ function playdate.BButtonUp()
 	end
 	bHeld = false
 	if not bSwingUsed and not bUsedToExitPtn then
-		-- Pure tap: toggle play/stop
-		isRunning = not isRunning
-		if isRunning then
+		local now = playdate.getCurrentTimeMilliseconds()
+		local isDoubleTap = (not isRunning) and (now - lastBTapTime < DOUBLE_TAP_MS)
+		lastBTapTime = now
 
-			updatePOSyncTrack()
-			sequence:play()
+		if isDoubleTap then
+			sequence:goToStep(1)
+			if chainEnabled and #chainList > 1 then
+				chainStep = 1
+				currentPattern = chainList[1]
+				loadPatternIntoSequence(currentPattern)
+			end
+			drawGrid()
 		else
-			sequence:stop()
+			isRunning = not isRunning
+			if isRunning then
+				updatePOSyncTrack()
+				sequence:play()
+			else
+				sequence:stop()
+			end
+			if crankQueuedPattern ~= nil then
+				currentPattern     = crankQueuedPattern
+				crankQueuedPattern = nil
+				crankShadowSlot    = nil
+				loadPatternIntoSequence(currentPattern)
+			end
 		end
-		if crankQueuedPattern ~= nil then
-			currentPattern     = crankQueuedPattern
-			crankQueuedPattern = nil
-			crankShadowSlot    = nil
-			loadPatternIntoSequence(currentPattern)
-		end
-	
 	end
 	bSwingUsed = false
 	bUsedToExitPtn = false
