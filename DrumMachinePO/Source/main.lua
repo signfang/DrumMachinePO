@@ -107,13 +107,17 @@ for p = 1, MAX_PATTERNS do
 	end
 end
 
-currentPattern = 1
-chainList      = { 1 }
-chainEnabled   = false
-chainStep      = 1
-bpmValue       = 120
-swingAmount    = 0.0
-poSyncEnabled  = false   -- declared early; used by applyPanRouting during startup
+currentPattern    = 1
+chains            = { { 1 } }   -- array of chainLists; chains[1] is the original single chain
+currentChainIndex = 1           -- which chain is active (future UI will allow switching)
+chainList         = chains[1]   -- alias: all existing code referencing chainList still works
+chainEnabled      = false
+chainStep         = 1
+bpmValue          = 120
+swingAmount       = 0.0
+poSyncEnabled     = false   -- declared early; used by applyPanRouting during startup
+
+
 
 
 
@@ -265,7 +269,19 @@ local function switchToPattern(patIdx)
 	saveCurrentPatternFromTracks()
 	currentPattern = patIdx
 	loadPatternIntoSequence(currentPattern)
+end
 
+-- Switch to a different chain by index (no UI yet; called from save/load and future UI).
+-- Re-points the chainList alias so all playback/edit code works without changes.
+local function switchToChain(idx)
+	saveCurrentPatternFromTracks()
+	currentChainIndex = math.max(1, math.min(#chains, idx))
+	chainList         = chains[currentChainIndex]
+	chainStep         = 1
+	if chainEnabled and #chainList > 0 then
+		currentPattern = chainList[1]
+		loadPatternIntoSequence(currentPattern)
+	end
 end
 
 
@@ -430,7 +446,7 @@ local function drawPatternUI()
 	gfx.setLineWidth(1)
 
 	-- Title
-	gfx.drawText("PATTERNS  BPM:" .. bpmValue, PAT_START_X, PAT_TITLE_Y)
+	
 
 	-- Pattern selection boxes (8 boxes)
 	for p = 1, MAX_PATTERNS do
@@ -460,6 +476,11 @@ local function drawPatternUI()
 		end
 		gfx.drawText(tostring(p), x + 4, y + 6)
 	end
+	if patternUIRow == 1 then
+		gfx.drawText("PATTERN " .. selectedPatternSlot .. " BPM:" .. bpmValue, PAT_START_X, PAT_TITLE_Y)
+	else
+		gfx.drawText("PATTERN BPM:" .. bpmValue, PAT_START_X, PAT_TITLE_Y)
+	end
 
 	-- Chain section label
 	gfx.setColor(gfx.kColorBlack)
@@ -468,7 +489,15 @@ local function drawPatternUI()
 		gfx.drawRect(PAT_START_X - 2, PAT_CHAIN_LABEL_Y - 2, 120, 16)
 		gfx.setLineWidth(1)
 	end
-	gfx.drawText("CHAIN: " .. (chainEnabled and "ON " or "OFF"), PAT_START_X, PAT_CHAIN_LABEL_Y)
+		gfx.drawText("CHAIN: " .. (chainEnabled and "ON " or "OFF"), PAT_START_X, PAT_CHAIN_LABEL_Y)
+
+	if patternUIRow == 3 and selectedChainSlot~=0 and selectedChainSlot > #chainList+1 then
+		gfx.drawText("CHAIN: " .. (chainEnabled and "ON " or "OFF") .. "(current: " .. chainList[selectedChainSlot] ..")", PAT_START_X, PAT_CHAIN_LABEL_Y)
+	else
+		gfx.drawText("CHAIN: " .. (chainEnabled and "ON " or "OFF"), PAT_START_X, PAT_CHAIN_LABEL_Y)
+	end
+
+	
 
 	-- [>] play-all button  (selectedChainSlot == 0)
 	local PLAY_W = 28
@@ -684,15 +713,23 @@ end
 local function projectToTable()
 	saveCurrentPatternFromTracks()
 	local proj = {
-		version      = 1,
-		bpm          = bpmValue,
-		swing        = math.floor(swingAmount/STEP_SCALE),
-		chainEnabled = chainEnabled,
-		chain        = {},
-		patterns     = {},
-		trackVolumes = {},
-		trackMutes   = {},
+		version           = 2,
+		bpm               = bpmValue,
+		swing             = swingAmount,   -- store raw float; v1 incorrectly divided by STEP_SCALE
+		chainEnabled      = chainEnabled,
+		chain             = {},            -- kept for v1 reader compatibility (mirrors chains[1])
+		chains            = {},            -- new: all chains
+		currentChainIndex = currentChainIndex,
+		patterns          = {},
+		trackVolumes      = {},
+		trackMutes        = {},
 	}
+	-- chains: array of arrays
+	for ci = 1, #chains do
+		proj.chains[ci] = {}
+		for i, v in ipairs(chains[ci]) do proj.chains[ci][i] = v end
+	end
+	-- legacy single-chain field (chains[currentChainIndex])
 	for i, v in ipairs(chainList) do proj.chain[i] = v end
 	for ti = 1, #tracks do
 		proj.trackVolumes[ti] = tracks[ti].volume
@@ -713,13 +750,41 @@ end
 local function projectFromTable(proj)
 	if not proj then return false end
 	bpmValue     = proj.bpm or 120
-	swingAmount  = proj.swing or 0.0
-	chainEnabled = proj.chainEnabled or false
-	chainList    = {}
-	if proj.chain then
-		for i, v in ipairs(proj.chain) do chainList[i] = v end
+	-- v1 incorrectly saved swing as swingAmount/STEP_SCALE (always 0 since swingAmount<1).
+	-- v2 saves the raw float. Detect by version field.
+	if (proj.version or 1) >= 2 then
+		swingAmount = proj.swing or 0.0
+	else
+		-- v1 swing was written as math.floor(swingAmount/STEP_SCALE) which is always 0.
+		-- Accept it as-is (0) — no recovery possible, but no corruption either.
+		swingAmount = proj.swing or 0.0
 	end
-	if #chainList == 0 then chainList = {1} end
+	chainEnabled = proj.chainEnabled or false
+
+	-- Rebuild chains table
+	if (proj.version or 1) >= 2 and proj.chains and #proj.chains > 0 then
+		-- v2: load all chains
+		chains = {}
+		for ci = 1, #proj.chains do
+			chains[ci] = {}
+			for i, v in ipairs(proj.chains[ci]) do chains[ci][i] = v end
+		end
+		currentChainIndex = proj.currentChainIndex or 1
+		currentChainIndex = math.max(1, math.min(#chains, currentChainIndex))
+	else
+		-- v1: single chain → wrap as chains[1]
+		chains = {}
+		chains[1] = {}
+		if proj.chain then
+			for i, v in ipairs(proj.chain) do chains[1][i] = v end
+		end
+		if #chains[1] == 0 then chains[1] = {1} end
+		currentChainIndex = 1
+	end
+	-- Re-point the global alias so all existing code keeps working
+	chainList = chains[currentChainIndex]
+	if #chainList == 0 then chainList[1] = 1 end
+
 	for ti = 1, #tracks do
 		tracks[ti].volume = (proj.trackVolumes and proj.trackVolumes[ti]) or 1.0
 		tracks[ti].muted  = (proj.trackMutes   and proj.trackMutes[ti])   or false
@@ -814,13 +879,23 @@ end
 local function projectToJSON(proj)
     local lines = {}
     lines[#lines+1] = '{'
-    lines[#lines+1] = '  "version": '      .. tostring(proj.version) .. ','
-    lines[#lines+1] = '  "bpm": '          .. tostring(proj.bpm) .. ','
-    lines[#lines+1] = '  "swing": '        .. tostring(proj.swing) .. ','
-    lines[#lines+1] = '  "chainEnabled": ' .. tostring(proj.chainEnabled) .. ','
+    lines[#lines+1] = '  "version": '           .. tostring(proj.version) .. ','
+    lines[#lines+1] = '  "bpm": '               .. tostring(proj.bpm) .. ','
+    lines[#lines+1] = '  "swing": '             .. tostring(proj.swing) .. ','
+    lines[#lines+1] = '  "chainEnabled": '      .. tostring(proj.chainEnabled) .. ','
+    lines[#lines+1] = '  "currentChainIndex": ' .. tostring(proj.currentChainIndex) .. ','
+    -- legacy single-chain field
     local chainParts = {}
     for _, v in ipairs(proj.chain) do chainParts[#chainParts+1] = tostring(v) end
     lines[#lines+1] = '  "chain": [' .. table.concat(chainParts, ', ') .. '],'
+    -- all chains
+    local chainArrayParts = {}
+    for ci = 1, #proj.chains do
+        local slotParts = {}
+        for _, v in ipairs(proj.chains[ci]) do slotParts[#slotParts+1] = tostring(v) end
+        chainArrayParts[#chainArrayParts+1] = '[' .. table.concat(slotParts, ', ') .. ']'
+    end
+    lines[#lines+1] = '  "chains": [' .. table.concat(chainArrayParts, ', ') .. '],'
     local volParts, muteParts = {}, {}
     for _, v in ipairs(proj.trackVolumes) do volParts[#volParts+1]  = tostring(v) end
     for _, v in ipairs(proj.trackMutes)   do muteParts[#muteParts+1] = (v and 'true' or 'false') end
@@ -947,15 +1022,62 @@ local function projectFromJSON(jsonStr)
 
     -- Build project table matching the shape projectFromTable() expects.
     local proj = {
-        version      = readNumber('version') or 1,
-        bpm          = readNumber('bpm')     or 120,
-        swing        = readNumber('swing')   or 0,
-        chainEnabled = readBool('chainEnabled') or false,
-        chain        = readNumberArray('chain'),
-        trackVolumes = readNumberArray('trackVolumes'),
-        trackMutes   = readBoolArray('trackMutes'),
-        patterns     = {},
+        version           = readNumber('version') or 1,
+        bpm               = readNumber('bpm')     or 120,
+        swing             = readNumber('swing')   or 0,
+        chainEnabled      = readBool('chainEnabled') or false,
+        currentChainIndex = readNumber('currentChainIndex') or 1,
+        chain             = readNumberArray('chain'),
+        trackVolumes      = readNumberArray('trackVolumes'),
+        trackMutes        = readBoolArray('trackMutes'),
+        patterns          = {},
+        chains            = {},
     }
+
+    -- Parse chains: "chains": [[1,2,3],[4,5]], an array of arrays.
+    local _, chainsStart = jsonStr:find('"chains"%s*:%s*%[')
+    if chainsStart then
+        -- Find the matching closing bracket for the outer array.
+        -- We walk character by character tracking bracket depth.
+        local depth = 0
+        local chainsEnd = chainsStart
+        for i = chainsStart, #jsonStr do
+            local ch = jsonStr:sub(i, i)
+            if ch == '[' then depth = depth + 1
+            elseif ch == ']' then
+                depth = depth - 1
+                if depth == 0 then chainsEnd = i; break end
+            end
+        end
+        local segment = jsonStr:sub(chainsStart, chainsEnd)
+        -- Each inner array is a [...] block; collect them in order.
+        -- Start at 2 to skip the outer opening '[' which is at position 1.
+        local searchPos = 2
+        while true do
+            local arrOpen = segment:find('%[', searchPos)
+            if not arrOpen then break end
+            local arrClose = segment:find('%]', arrOpen)
+            if not arrClose then break end
+            local inner = segment:sub(arrOpen + 1, arrClose - 1)
+            local chain = {}
+            for numStr in inner:gmatch('%-?%d+%.?%d*') do
+                chain[#chain+1] = tonumber(numStr)
+            end
+            if #chain > 0 then
+                proj.chains[#proj.chains+1] = chain
+            end
+            searchPos = arrClose + 1
+        end
+    end
+    -- Fallback: if no chains parsed, derive from legacy "chain" field
+    if #proj.chains == 0 then
+        if #proj.chain > 0 then
+            proj.chains[1] = proj.chain
+        else
+            proj.chains[1] = {1}
+        end
+        proj.currentChainIndex = 1
+    end
 
     -- Parse patterns: "1": [[s,s,...], [s,s,...], ...], "2": [...], ...
     -- Find the "patterns" object opening brace.
@@ -1067,13 +1189,14 @@ function playdate.update()
 	local step = math.ceil(rawStep / STEP_SCALE)
 
 	-- Chain advancement: when step wraps from NUM_STEPS back to 1
-	--print("Current step:",step)
 	if chainEnabled and #chainList > 1 and isRunning then
 		if step == NUM_STEPS and lastStepForChain == NUM_STEPS - 1 then
 			chainStep = chainStep % #chainList + 1
 			saveCurrentPatternFromTracks()
 			currentPattern = chainList[chainStep]
 			loadPatternIntoSequence(currentPattern)
+			-- Re-point alias in case chains table was rebuilt (e.g. after load)
+			chainList = chains[currentChainIndex]
 			drawGrid()
 		end
 	end
@@ -1649,27 +1772,13 @@ end
 -- AUTOSAVE / AUTOLOAD  (slot 0)
 -- ============================================================
 
--- Silently autoload slot 0 on startup (no dialog — this is our own save)
--- was: local autoData = playdate.datastore.read("project_0")
--- replace with:
-local autoLoaded = loadProject(0)
--- remove the if autoData then projectFromTable(autoData) end block
-
-if autoData then
-	projectFromTable(autoData)
-end
+-- Silently autoload slot 0 on startup (no dialog — this is our own autosave)
+loadProject(0)
 
 -- Autosave to slot 0 whenever the game is about to terminate
 function playdate.gameWillTerminate()
 	saveProject(0)
 end
-
---[[
--- Also autosave when the game is paused (menu opened), so data is safe
-function playdate.gameWillPause()
-	saveProject(0)
-end
-]]--
 
 -- ============================================================
 -- INITIAL DRAW
