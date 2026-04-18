@@ -107,17 +107,19 @@ for p = 1, MAX_PATTERNS do
 	end
 end
 
+MAX_CHAINS        = 8
 currentPattern    = 1
-chains            = { { 1 } }   -- array of chainLists; chains[1] is the original single chain
-currentChainIndex = 1           -- which chain is active (future UI will allow switching)
+-- Pre-allocate MAX_CHAINS chains; each starts with a single-slot chain pointing at pattern 1.
+-- This makes every slot immediately usable without needing an "add chain" action.
+chains            = {}
+for _ci = 1, MAX_CHAINS do chains[_ci] = { 1 } end
+currentChainIndex = 1           -- which chain is active
 chainList         = chains[1]   -- alias: all existing code referencing chainList still works
 chainEnabled      = false
 chainStep         = 1
 bpmValue          = 120
 swingAmount       = 0.0
 poSyncEnabled     = false   -- declared early; used by applyPanRouting during startup
-
-
 
 
 
@@ -271,11 +273,11 @@ local function switchToPattern(patIdx)
 	loadPatternIntoSequence(currentPattern)
 end
 
--- Switch to a different chain by index (no UI yet; called from save/load and future UI).
--- Re-points the chainList alias so all playback/edit code works without changes.
+-- Switch active chain by index. Re-points the chainList alias so all
+-- playback/edit code works without changes. Safe to call at any time.
 local function switchToChain(idx)
 	saveCurrentPatternFromTracks()
-	currentChainIndex = math.max(1, math.min(#chains, idx))
+	currentChainIndex = math.max(1, math.min(MAX_CHAINS, idx))
 	chainList         = chains[currentChainIndex]
 	chainStep         = 1
 	if chainEnabled and #chainList > 0 then
@@ -415,6 +417,8 @@ local function drawCell(col, row)
 	-- reset line width so other draws aren't affected
 	gfx.setLineWidth(1)
 end
+local MAX_SAVE_SLOTS       = 8
+
 
 -- Pattern UI layout (all Y positions explicit, no derived overlaps)
 local PAT_BOX_W   = 36   -- width of each pattern box
@@ -425,18 +429,21 @@ local PAT_TITLE_Y  = 0   -- "PATTERNS  BPM:xxx"
 local PAT_BOXES_Y  = 18  -- top of pattern boxes row
 local PAT_CHAIN_LABEL_Y = 48  -- "CHAIN: ON/OFF"
 local PAT_CHAIN_ROW_Y   = 67  -- top of chain slots row (height 20)
-local PAT_HELP1_Y  = 192-- first help line
-local PAT_HELP2_Y  = 212 -- second help line
 
 
-local PAT_SAVE_SLOT_ROW_Y  = 98   -- save/load is now row 3
-local PAT_SAVE_ROW_Y  = 118
-local PAT_LOAD_ROW_Y  = 138   
-local MAX_SAVE_SLOTS  = 8
+local PAT_CHAIN_SEL_Y      = 95    -- new row 4: "PATTERN CHAIN: x / y"
 
 
+local PAT_SAVE_SLOT_ROW_Y  = 115   -- was 98; shifted down 20px to make room for chain selector row
+local PAT_SAVE_ROW_Y       = 135   -- was 118
+local PAT_LOAD_ROW_Y       = 155   -- was 138
+local PAT_PO_SYNC_Y        = 175   -- was 165; shifted down to fit
 
-local PAT_PO_SYNC_Y   = 165  -- PO sync is now row 4 (bottom)
+local PAT_HELP_SEP_Y = 193 -- help line separator
+local PAT_HELP1_Y  = 197 -- first help line
+local PAT_HELP2_Y  = 217 -- second help line
+
+
 
 
 currentSaveSlot = 1          -- global; user slots 1–8; slot 0 is autosave (not user-selectable)
@@ -446,7 +453,6 @@ local function drawPatternUI()
 	gfx.setLineWidth(1)
 
 	-- Title
-	
 
 	-- Pattern selection boxes (8 boxes)
 	for p = 1, MAX_PATTERNS do
@@ -476,12 +482,12 @@ local function drawPatternUI()
 		end
 		gfx.drawText(tostring(p), x + 4, y + 6)
 	end
+
 	if patternUIRow == 1 then
 		gfx.drawText("PATTERN " .. selectedPatternSlot .. " BPM:" .. bpmValue, PAT_START_X, PAT_TITLE_Y)
 	else
 		gfx.drawText("PATTERN BPM:" .. bpmValue, PAT_START_X, PAT_TITLE_Y)
 	end
-
 	-- Chain section label
 	gfx.setColor(gfx.kColorBlack)
 	if patternUIRow == 2 then
@@ -489,15 +495,15 @@ local function drawPatternUI()
 		gfx.drawRect(PAT_START_X - 2, PAT_CHAIN_LABEL_Y - 2, 120, 16)
 		gfx.setLineWidth(1)
 	end
-		gfx.drawText("CHAIN: " .. (chainEnabled and "ON " or "OFF"), PAT_START_X, PAT_CHAIN_LABEL_Y)
+	gfx.setColor(gfx.kColorBlack)
 
-	if patternUIRow == 3 and selectedChainSlot~=0 and selectedChainSlot > #chainList+1 then
-		gfx.drawText("CHAIN: " .. (chainEnabled and "ON " or "OFF") .. "(current: " .. chainList[selectedChainSlot] ..")", PAT_START_X, PAT_CHAIN_LABEL_Y)
+	if patternUIRow == 3 and selectedChainSlot~=0 and selectedChainSlot < #chainList+1 then
+		gfx.drawText("CHAIN: " .. (chainEnabled and "ON " or "OFF") .. "(selected pattern: " .. chainList[selectedChainSlot] ..")", PAT_START_X, PAT_CHAIN_LABEL_Y)
 	else
 		gfx.drawText("CHAIN: " .. (chainEnabled and "ON " or "OFF"), PAT_START_X, PAT_CHAIN_LABEL_Y)
 	end
 
-	
+
 
 	-- [>] play-all button  (selectedChainSlot == 0)
 	local PLAY_W = 28
@@ -534,10 +540,22 @@ local function drawPatternUI()
 	
 
 
-	-- SAVE/LOAD slot row  (patternUIRow == 4)
+	-- CHAIN SELECTOR row  (patternUIRow == 4)
+	-- Shows "PATTERN CHAIN: x / y" with L/R to switch active chain.
+	-- The chain slot editor (row 3) always edits the currently selected chain.
+	gfx.setColor(gfx.kColorBlack)
+	local chainSelText = "CURRENT PATTERN CHAIN: " .. currentChainIndex .. " / " .. MAX_CHAINS
+	if patternUIRow == 4 then
+		gfx.setLineWidth(3)
+		gfx.drawRect(PAT_START_X - 2, PAT_CHAIN_SEL_Y - 2, 320, 16)
+		gfx.setLineWidth(1)
+	end
+	gfx.drawText(chainSelText, PAT_START_X, PAT_CHAIN_SEL_Y)
+
+	-- SAVE/LOAD slot row  (patternUIRow == 5)
 	gfx.setColor(gfx.kColorBlack)
 	local saveText = "PROJECT SLOT: " .. currentSaveSlot .. " / " .. MAX_SAVE_SLOTS
-	if patternUIRow == 4 then
+	if patternUIRow == 5 then
 		gfx.setLineWidth(3)
 		gfx.drawRect(PAT_START_X - 2, PAT_SAVE_SLOT_ROW_Y - 2, 220, 16)
 		gfx.setLineWidth(1)
@@ -546,10 +564,9 @@ local function drawPatternUI()
 	
 	gfx.setColor(gfx.kColorBlack)
 
-	-- test
 	gfx.drawText("SAVE PROJECT", PAT_START_X, PAT_SAVE_ROW_Y)
 	
-	if patternUIRow == 5 then
+	if patternUIRow == 6 then
 		gfx.setLineWidth(3)
 		gfx.drawRect(PAT_START_X - 2, PAT_SAVE_ROW_Y - 2, 120, 16)
 		gfx.setLineWidth(1)
@@ -557,16 +574,16 @@ local function drawPatternUI()
 	
 	gfx.drawText("LOAD PROJECT", PAT_START_X, PAT_LOAD_ROW_Y)
 	
-	if patternUIRow == 6 then
+	if patternUIRow == 7 then
 		gfx.setLineWidth(3)
 		gfx.drawRect(PAT_START_X - 2, PAT_LOAD_ROW_Y - 2, 120, 16)
 		gfx.setLineWidth(1)
 	end
 
-	-- PO SYNC row  (patternUIRow == 6)
+	-- PO SYNC row  (patternUIRow == 8)
 	gfx.setColor(gfx.kColorBlack)
 	local syncText = "PO SYNC: " .. (poSyncEnabled and "ON" or "OFF")
-	if patternUIRow == 7 then
+	if patternUIRow == 8 then
 		gfx.setLineWidth(3)
 		gfx.drawRect(PAT_START_X - 2, PAT_PO_SYNC_Y - 2, 150, 16)
 		gfx.setLineWidth(1)
@@ -574,7 +591,7 @@ local function drawPatternUI()
 	gfx.drawText(syncText, PAT_START_X, PAT_PO_SYNC_Y)
 
 	-- Divider line before help area
-	gfx.drawLine(0, 185, 400, 185)
+	gfx.drawLine(0, PAT_HELP_SEP_Y, 400, PAT_HELP_SEP_Y)
 
 	-- Help text — changes based on mode
 	gfx.setColor(gfx.kColorBlack)
@@ -599,18 +616,18 @@ local function drawPatternUI()
 		end
 		gfx.drawText("L/R:move / Crank:change val / Up:pats", PAT_START_X, PAT_HELP2_Y)
 	elseif patternUIRow == 4 then
+		gfx.drawText("L/R: switch pattern chain", PAT_START_X, PAT_HELP1_Y)
+		gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
+	elseif patternUIRow == 5 then
 		gfx.drawText("L/R: change slot", PAT_START_X, PAT_HELP1_Y)
 		gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
-	
-	
-	elseif patternUIRow == 5 then
+	elseif patternUIRow == 6 then
 		gfx.drawText("A: save", PAT_START_X, PAT_HELP1_Y)
 		gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
-	elseif patternUIRow == 6 then
+	elseif patternUIRow == 7 then
 		gfx.drawText("A: load", PAT_START_X, PAT_HELP1_Y)
 		gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
-	
-	elseif patternUIRow == 7 then
+	elseif patternUIRow == 8 then
 		gfx.drawText("A: toggle PO sync (SY1 equiv.)", PAT_START_X, PAT_HELP1_Y)
 		gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
 	end
@@ -715,21 +732,19 @@ local function projectToTable()
 	local proj = {
 		version           = 2,
 		bpm               = bpmValue,
-		swing             = swingAmount,   -- store raw float; v1 incorrectly divided by STEP_SCALE
+		swing             = swingAmount,   -- raw float; v1 incorrectly divided by STEP_SCALE
 		chainEnabled      = chainEnabled,
-		chain             = {},            -- kept for v1 reader compatibility (mirrors chains[1])
+		chain             = {},            -- legacy v1 compat (mirrors active chain)
 		chains            = {},            -- new: all chains
 		currentChainIndex = currentChainIndex,
 		patterns          = {},
 		trackVolumes      = {},
 		trackMutes        = {},
 	}
-	-- chains: array of arrays
 	for ci = 1, #chains do
 		proj.chains[ci] = {}
 		for i, v in ipairs(chains[ci]) do proj.chains[ci][i] = v end
 	end
-	-- legacy single-chain field (chains[currentChainIndex])
 	for i, v in ipairs(chainList) do proj.chain[i] = v end
 	for ti = 1, #tracks do
 		proj.trackVolumes[ti] = tracks[ti].volume
@@ -750,20 +765,11 @@ end
 local function projectFromTable(proj)
 	if not proj then return false end
 	bpmValue     = proj.bpm or 120
-	-- v1 incorrectly saved swing as swingAmount/STEP_SCALE (always 0 since swingAmount<1).
-	-- v2 saves the raw float. Detect by version field.
-	if (proj.version or 1) >= 2 then
-		swingAmount = proj.swing or 0.0
-	else
-		-- v1 swing was written as math.floor(swingAmount/STEP_SCALE) which is always 0.
-		-- Accept it as-is (0) — no recovery possible, but no corruption either.
-		swingAmount = proj.swing or 0.0
-	end
+	swingAmount  = proj.swing or 0.0   -- v1 saved 0 here always (bug); v2 saves raw float
 	chainEnabled = proj.chainEnabled or false
 
-	-- Rebuild chains table
+	-- Rebuild chains table with version migration
 	if (proj.version or 1) >= 2 and proj.chains and #proj.chains > 0 then
-		-- v2: load all chains
 		chains = {}
 		for ci = 1, #proj.chains do
 			chains[ci] = {}
@@ -781,9 +787,11 @@ local function projectFromTable(proj)
 		if #chains[1] == 0 then chains[1] = {1} end
 		currentChainIndex = 1
 	end
-	-- Re-point the global alias so all existing code keeps working
+	-- Re-point global alias so all existing code keeps working
 	chainList = chains[currentChainIndex]
 	if #chainList == 0 then chainList[1] = 1 end
+	-- Ensure chains is always exactly MAX_CHAINS long (pad with default if save had fewer)
+	while #chains < MAX_CHAINS do chains[#chains + 1] = { 1 } end
 
 	for ti = 1, #tracks do
 		tracks[ti].volume = (proj.trackVolumes and proj.trackVolumes[ti]) or 1.0
@@ -1034,24 +1042,22 @@ local function projectFromJSON(jsonStr)
         chains            = {},
     }
 
-    -- Parse chains: "chains": [[1,2,3],[4,5]], an array of arrays.
+    -- Parse "chains": [[1,2],[3,4],...] — an array of arrays.
     local _, chainsStart = jsonStr:find('"chains"%s*:%s*%[')
     if chainsStart then
-        -- Find the matching closing bracket for the outer array.
-        -- We walk character by character tracking bracket depth.
+        -- Walk forward tracking bracket depth to find the outer closing ']'.
         local depth = 0
         local chainsEnd = chainsStart
         for i = chainsStart, #jsonStr do
             local ch = jsonStr:sub(i, i)
-            if ch == '[' then depth = depth + 1
+            if     ch == '[' then depth = depth + 1
             elseif ch == ']' then
                 depth = depth - 1
                 if depth == 0 then chainsEnd = i; break end
             end
         end
         local segment = jsonStr:sub(chainsStart, chainsEnd)
-        -- Each inner array is a [...] block; collect them in order.
-        -- Start at 2 to skip the outer opening '[' which is at position 1.
+        -- Start at 2 to skip the outer opening '['.
         local searchPos = 2
         while true do
             local arrOpen = segment:find('%[', searchPos)
@@ -1069,13 +1075,9 @@ local function projectFromJSON(jsonStr)
             searchPos = arrClose + 1
         end
     end
-    -- Fallback: if no chains parsed, derive from legacy "chain" field
+    -- Fallback: no chains field → derive from legacy "chain"
     if #proj.chains == 0 then
-        if #proj.chain > 0 then
-            proj.chains[1] = proj.chain
-        else
-            proj.chains[1] = {1}
-        end
+        proj.chains[1]        = (#proj.chain > 0) and proj.chain or {1}
         proj.currentChainIndex = 1
     end
 
@@ -1189,14 +1191,14 @@ function playdate.update()
 	local step = math.ceil(rawStep / STEP_SCALE)
 
 	-- Chain advancement: when step wraps from NUM_STEPS back to 1
+	--print("Current step:",step)
 	if chainEnabled and #chainList > 1 and isRunning then
 		if step == NUM_STEPS and lastStepForChain == NUM_STEPS - 1 then
 			chainStep = chainStep % #chainList + 1
 			saveCurrentPatternFromTracks()
 			currentPattern = chainList[chainStep]
 			loadPatternIntoSequence(currentPattern)
-			-- Re-point alias in case chains table was rebuilt (e.g. after load)
-			chainList = chains[currentChainIndex]
+			chainList = chains[currentChainIndex]   -- re-point alias defensively
 			drawGrid()
 		end
 	end
@@ -1359,7 +1361,7 @@ local function patternModeA()
 			return
 		end
 
-	elseif patternUIRow == 5 then
+	elseif patternUIRow == 6 then
 		-- SAVE: confirm before overwriting
 		local slot = currentSaveSlot
 		showDialog("Save to slot " .. slot .. "?", function(confirmed)
@@ -1372,7 +1374,7 @@ local function patternModeA()
 		drawGrid()
 		return
 
-	elseif patternUIRow == 6 then
+	elseif patternUIRow == 7 then
 		-- LOAD: confirm before discarding unsaved changes
 		local slot = currentSaveSlot
 		showDialog("Load slot " .. slot .. "? Unsaved changes lost.", function(confirmed)
@@ -1385,9 +1387,8 @@ local function patternModeA()
 		end)
 		drawGrid()
 		return
-	
 
-	elseif patternUIRow == 7 then
+	elseif patternUIRow == 8 then
 		-- PO SYNC TOGGLE
 		poSyncEnabled = not poSyncEnabled
 		updatePOSyncTrack()
@@ -1438,6 +1439,11 @@ function playdate.leftButtonDown()
 		if patternUIRow == 1 then
 			if selectedPatternSlot > 1 then selectedPatternSlot = selectedPatternSlot - 1 end
 		elseif patternUIRow == 4 then
+			-- Chain selector: switch to previous chain
+			if currentChainIndex > 1 then
+				switchToChain(currentChainIndex - 1)
+			end
+		elseif patternUIRow == 5 then
 			if currentSaveSlot > 1 then currentSaveSlot = currentSaveSlot - 1 end
 		elseif patternUIRow == 3 then
 			if selectedChainSlot > 0 then selectedChainSlot = selectedChainSlot - 1 end
@@ -1459,6 +1465,11 @@ function playdate.rightButtonDown()
 		if patternUIRow == 1 then
 			if selectedPatternSlot < MAX_PATTERNS then selectedPatternSlot = selectedPatternSlot + 1 end
 		elseif patternUIRow == 4 then
+			-- Chain selector: switch to next chain (up to MAX_CHAINS)
+			if currentChainIndex < MAX_CHAINS then
+				switchToChain(currentChainIndex + 1)
+			end
+		elseif patternUIRow == 5 then
 			if currentSaveSlot < MAX_SAVE_SLOTS then currentSaveSlot = currentSaveSlot + 1 end
 		elseif patternUIRow == 3 then
 			if selectedChainSlot < #chainList + 1 then selectedChainSlot = selectedChainSlot + 1 end
@@ -1508,7 +1519,7 @@ end
 function playdate.downButtonDown()
 	if dialogMessage ~= nil then return end
 	if uiMode == "pattern" then
-		if patternUIRow < 7 then
+		if patternUIRow < 8 then
 			patternUIRow += 1
 		end
 		drawGrid()
@@ -1542,8 +1553,8 @@ function playdate.AButtonDown()
 		-- Row 1: hold timer runs in update(); tap handled in AButtonUp.
 		-- Row 4 (save) and Row 5 (load): open a dialog, so also deferred to AButtonUp.
 		local deferToUp = patternUIRow == 1
-			or patternUIRow == 5
 			or patternUIRow == 6
+			or patternUIRow == 7
 			or (patternUIRow == 2 and selectedChainSlot == 0)  -- [>] deferred
 		if deferToUp then
 			patternAHoldFrames = 0
@@ -1592,7 +1603,7 @@ function playdate.AButtonUp()
 				end
 				patternAHoldFrames = 0
 			end
-		elseif patternUIRow == 5 or patternUIRow == 6 then
+		elseif patternUIRow == 6 or patternUIRow == 7 then
 			patternModeA()
 		elseif patternUIRow == 3 and selectedChainSlot == 0 then
 			patternModeA()   
@@ -1705,6 +1716,7 @@ end
 -- ============================================================
 
 function playdate.cranked(change, _)
+		--print(patternUIRow,currentChainIndex,selectedPatternSlot)
 	crankAccum = crankAccum + change
 
 	if uiMode == "grid" then
