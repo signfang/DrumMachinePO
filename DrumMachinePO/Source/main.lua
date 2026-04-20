@@ -23,6 +23,28 @@ snd.addEffect(d)
 crankQueuedPattern = nil   -- pattern to play next (set by crank, cleared after one bar)
 crankShadowSlot    = nil   -- which chainStep position was shadowed, so we can resume correctly
 
+performanceMode = false   -- global; checked by every input handler
+
+-- ---- Debug status state -----------------------------------------
+-- Tracks the live input state shown on the performance screen.
+local perfStatus = {
+	lastEvent  = "—",          -- most recent input event label
+	crankTotal = 0,            -- cumulative crank degrees since entering perf mode
+	-- per-button held state (true while pressed)
+	held = { up=false, down=false, left=false, right=false, a=false, b=false },
+}
+
+local function perfStatusString()
+	-- Build a compact held-buttons string, e.g. "A  B  LEFT"
+	local held = {}
+	local order = { "up", "down", "left", "right", "a", "b" }
+	local labels = { up="UP", down="DOWN", left="LEFT", right="RIGHT", a="A", b="B" }
+	for _, k in ipairs(order) do
+		if perfStatus.held[k] then held[#held+1] = labels[k] end
+	end
+	return #held > 0 and table.concat(held, "  ") or "none"
+end
+
 
 -- ============================================================
 -- TRACK / INSTRUMENT SETUP
@@ -633,7 +655,64 @@ local function drawPatternUI()
 	end
 end
 
+-- ---- Draw -------------------------------------------------------
+local function drawPerformanceMode()
+	gfx.lockFocus(grid)
+
+	-- Black background (display is inverted, so kColorWhite = visually black)
+	gfx.setColor(gfx.kColorWhite)
+	gfx.fillRect(0, 0, 400, 240)
+
+
+
+
+	-- All text draws in kColorBlack = visually white on inverted display
+	gfx.setColor(gfx.kColorBlack)
+
+
+	--[[
+	-- Title
+	gfx.drawText("*PERFORMANCE MODE*", 8, 6)
+
+	-- Separator
+	gfx.setLineWidth(1)
+	gfx.drawLine(0, 22, 400, 22)
+
+	-- Debug block
+	local lineH = 22
+	local x, y = 8, 30
+
+	gfx.drawText("Last event:", x, y)
+	gfx.drawText("*" .. perfStatus.lastEvent .. "*", x + 100, y)
+
+	y = y + lineH
+	gfx.drawText("Held:", x, y)
+	gfx.drawText(perfStatusString(), x + 100, y)
+
+	y = y + lineH
+	gfx.drawText("Crank total:", x, y)
+	gfx.drawText(string.format("*%.1f°*", perfStatus.crankTotal), x + 100, y)
+
+	y = y + lineH
+	gfx.drawText("Crank angle:", x, y)
+	gfx.drawText(string.format("*%.1f°*", playdate.getCrankPosition()), x + 100, y)
+
+	-- Footer separator
+	gfx.drawLine(0, 210, 400, 210)
+	gfx.drawText("Menu > Performance to exit", 8, 215)
+
+	gfx.unlockFocus()
+
+	]]--
+
+	
+end
+
+
+
+
 function drawGrid()
+	if performanceMode then drawPerformanceMode(); return end
 	gfx.lockFocus(grid)
 	gfx.clear(gfx.kColorWhite)
 	gfx.setLineWidth(1)
@@ -1170,9 +1249,107 @@ local menu = playdate.getSystemMenu()
 
 
 menu:addMenuItem("PTNs/settings", function()
+	performanceMode = false   -- leaving performance mode via any other menu item
 	uiMode = "pattern"
 	patternUIRow = 1
 	drawGrid()
+end)
+
+-- ============================================================
+-- PERFORMANCE MODE
+--
+-- When performanceMode is true, ALL button inputs and crank
+-- events are routed exclusively to the performance handler
+-- functions below. The rest of the input system is bypassed.
+--
+-- Enter/exit via the system menu item "Performance".
+-- ============================================================
+
+
+-- ---- Input stubs ------------------------------------------------
+-- These functions are called exclusively when performanceMode == true.
+-- Rename, expand, or replace them to implement your performance logic.
+
+local function perfUpDown()
+	perfStatus.lastEvent = "UP down"
+	perfStatus.held.up   = true
+	drawPerformanceMode()
+end
+local function perfUpUp()
+	perfStatus.lastEvent = "UP up"
+	perfStatus.held.up   = false
+	drawPerformanceMode()
+end
+local function perfDownDown()
+	perfStatus.lastEvent  = "DOWN down"
+	perfStatus.held.down  = true
+	drawPerformanceMode()
+end
+local function perfDownUp()
+	perfStatus.lastEvent  = "DOWN up"
+	perfStatus.held.down  = false
+	drawPerformanceMode()
+end
+local function perfLeftDown()
+	perfStatus.lastEvent  = "LEFT down"
+	perfStatus.held.left  = true
+	drawPerformanceMode()
+end
+local function perfLeftUp()
+	perfStatus.lastEvent  = "LEFT up"
+	perfStatus.held.left  = false
+	drawPerformanceMode()
+end
+local function perfRightDown()
+	perfStatus.lastEvent   = "RIGHT down"
+	perfStatus.held.right  = true
+	drawPerformanceMode()
+end
+local function perfRightUp()
+	perfStatus.lastEvent   = "RIGHT up"
+	perfStatus.held.right  = false
+	drawPerformanceMode()
+end
+local function perfADown()
+	perfStatus.lastEvent = "A down"
+	perfStatus.held.a    = true
+	drawPerformanceMode()
+end
+local function perfAUp()
+	perfStatus.lastEvent = "A up"
+	perfStatus.held.a    = false
+	drawPerformanceMode()
+end
+local function perfBDown()
+	perfStatus.lastEvent = "B down"
+	perfStatus.held.b    = true
+	drawPerformanceMode()
+end
+local function perfBUp()
+	perfStatus.lastEvent = "B up"
+	perfStatus.held.b    = false
+	drawPerformanceMode()
+end
+local function perfCranked(change, acceleratedChange)
+	perfStatus.crankTotal = perfStatus.crankTotal + change
+	perfStatus.lastEvent  = string.format("CRANK %+.1f°", change)
+	drawPerformanceMode()
+end
+
+-- System menu toggle
+menu:addMenuItem("Performance", function()
+	performanceMode = not performanceMode
+	if performanceMode then
+		-- Reset debug state for a clean display
+		perfStatus.lastEvent  = "—"
+		perfStatus.crankTotal = 0
+		perfStatus.held = { up=false, down=false, left=false, right=false, a=false, b=false }
+		-- Ensure we are not stuck inside pattern UI
+		uiMode = "grid"
+		drawPerformanceMode()
+	else
+		drawGrid()
+	end
 end)
 
 
@@ -1203,6 +1380,13 @@ function playdate.update()
 		end
 	end
 	lastStepForChain = step
+
+	if performanceMode then
+		-- Performance mode: blit the static performance screen every frame.
+		-- The sequencer keeps running (chain logic above still executes).
+		grid:draw(0, 0)
+		return
+	end
 
 	-- Always blit the offscreen image so mode changes appear immediately.
 	-- Only redraw the playhead overlay when the step actually changes.
@@ -1434,6 +1618,7 @@ local bSwingUsed = false   -- true if crank moved swing while B was held
 local aBPMUsed = false   -- true if crank moved swing while A was held
 
 function playdate.leftButtonDown()
+	if performanceMode then perfLeftDown(); return end
 	if dialogMessage ~= nil then return end
 	if uiMode == "pattern" then
 		if patternUIRow == 1 then
@@ -1460,6 +1645,7 @@ function playdate.leftButtonDown()
 end
 
 function playdate.rightButtonDown()
+	if performanceMode then perfRightDown(); return end
 	if dialogMessage ~= nil then return end
 	if uiMode == "pattern" then
 		if patternUIRow == 1 then
@@ -1487,6 +1673,7 @@ end
 -- upButtonDown: pressing Up while already on pattern row 1 toggles chain on/off.
 -- This doubles as a simple toggle without needing a 4th menu item.
 function playdate.upButtonDown()
+	if performanceMode then perfUpDown(); return end
 	if dialogMessage ~= nil then return end
 	if uiMode == "pattern" then
 		if patternUIRow > 1 then
@@ -1517,6 +1704,7 @@ function playdate.upButtonDown()
 end
 
 function playdate.downButtonDown()
+	if performanceMode then perfDownDown(); return end
 	if dialogMessage ~= nil then return end
 	if uiMode == "pattern" then
 		if patternUIRow < 8 then
@@ -1542,7 +1730,26 @@ function playdate.downButtonDown()
 	end
 end
 
+-- Release handlers for directional buttons.
+-- In normal mode these are no-ops; performance mode routes them to perf stubs.
+function playdate.upButtonUp()
+	if performanceMode then perfUpUp(); return end
+end
+
+function playdate.downButtonUp()
+	if performanceMode then perfDownUp(); return end
+end
+
+function playdate.leftButtonUp()
+	if performanceMode then perfLeftUp(); return end
+end
+
+function playdate.rightButtonUp()
+	if performanceMode then perfRightUp(); return end
+end
+
 function playdate.AButtonDown()
+	if performanceMode then perfADown(); return end
 	-- Dialog: A = Yes/Confirm (handled on AButtonUp to avoid same-press confirm)
 	if dialogMessage ~= nil then return end
 
@@ -1570,6 +1777,7 @@ function playdate.AButtonDown()
 end
 
 function playdate.AButtonUp()
+	if performanceMode then perfAUp(); return end
 	-- Dialog: A = Yes/Confirm
 	if dialogMessage ~= nil then
 		dismissDialog(true)
@@ -1633,6 +1841,7 @@ end
 
 
 function playdate.BButtonDown()
+	if performanceMode then perfBDown(); return end
 	-- Dialog: B = No/Cancel
 	if dialogMessage ~= nil then
 		dismissDialog(false)
@@ -1657,6 +1866,7 @@ end
 
 
 function playdate.BButtonUp()
+	if performanceMode then perfBUp(); return end
 	if uiMode == "pattern" then
 		-- Only fire the tap action if neither the hold nor a dialog consumed this press
 		if not patternBHoldUsed and not patternBConsumedByDialog then
@@ -1715,7 +1925,8 @@ end
 --   elsewhere       → coarse BPM ±5
 -- ============================================================
 
-function playdate.cranked(change, _)
+function playdate.cranked(change, acceleratedChange)
+	if performanceMode then perfCranked(change, acceleratedChange); return end
 		--print(patternUIRow,currentChainIndex,selectedPatternSlot)
 	crankAccum = crankAccum + change
 
