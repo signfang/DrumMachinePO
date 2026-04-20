@@ -712,12 +712,14 @@ function drawGrid()
 			gfx.drawText(":" .. swingPct, STATUS_X, ROW_HEIGHT)
 			gfx.drawText("BPM", STATUS_X, ROW_HEIGHT*2)
 			gfx.drawText(":" .. bpmValue, STATUS_X, ROW_HEIGHT*3)
+
 		elseif adjusting then
 			local swingTag = swingPct > 0 and ("SW:" .. swingPct .. "%") or ""
 			gfx.drawText("P:" .. currentPattern .. chainTag, STATUS_X, 0)
 			gfx.drawText("BPM", STATUS_X, ROW_HEIGHT)
 			gfx.drawText(":" .. bpmValue, STATUS_X, ROW_HEIGHT*2)
 			gfx.drawText(swingTag, STATUS_X, ROW_HEIGHT*3)		
+
 		else
 			local swingTag1 = swingPct > 0 and ("SW:") or ""
 			local swingTag2 = swingPct > 0 and (swingPct .. "%") or ""
@@ -725,9 +727,11 @@ function drawGrid()
 			gfx.drawText("BPM", STATUS_X, ROW_HEIGHT)
 			gfx.drawText(":" ..bpmValue, STATUS_X, ROW_HEIGHT*2)
 			gfx.drawText(swingTag1, STATUS_X, ROW_HEIGHT*3)			
-			gfx.drawText(swingTag2, STATUS_X, ROW_HEIGHT*4)	
-			
+			gfx.drawText(swingTag2, STATUS_X, ROW_HEIGHT*4)				
+
 		end
+		
+		gfx.drawText("C:" .. currentChainIndex, STATUS_X, ROW_HEIGHT*13)	
 	elseif uiMode == "pattern" then
 		drawPatternUI()
 	end
@@ -1242,10 +1246,10 @@ local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
 local function perfApplyFxCrank(dir)
 	local fx = PERF_FX_NAMES[perfFxIndex]
 	if fx == "BPM" then
-		bpmValue = clamp(bpmValue + dir * 2, 10, 300)
+		bpmValue = clamp(bpmValue + dir * 1, 10, 300)		
 		setBPM(bpmValue)
-	elseif fx == "Swing" then
-		swingAmount = clamp(swingAmount + dir * 0.05, 0.0, 0.75)
+	elseif fx == "Swing" then		
+		swingAmount = clamp(swingAmount + dir * 0.01, 0.0, 0.75)
 		applySwingToAllTracks()
 	end
 end
@@ -1475,7 +1479,7 @@ local function perfCranked(change, acceleratedChange)
 		end
 	else
 		-- Free crank: control active effect
-		local threshold = 15
+		local threshold = 10
 		if math.abs(perfCrankAccum) >= threshold then
 			local dir2 = perfCrankAccum > 0 and 1 or -1
 			perfCrankAccum = 0
@@ -2089,9 +2093,8 @@ end
 -- ============================================================
 -- CRANK
 -- Grid mode:
---   B held + crank  → swing (0–50%, steps of 5%, threshold 20°)
+--   B held + crank  → swing (0–50%, steps of 1%, threshold 20°)
 --   A held + crank  → fine BPM ±1 (threshold 10°)
---   free crank      → coarse BPM ±5 (threshold 30°)
 -- Pattern mode:
 --   chain row 2     → chain slot value
 --   elsewhere       → coarse BPM ±5
@@ -2124,7 +2127,7 @@ function playdate.cranked(change, acceleratedChange)
 				drawGrid()
 			end
 		else
-			if math.abs(crankAccum) >= 30 then
+			if math.abs(crankAccum) >= 10 then
 				local dir = crankAccum > 0 and 1 or -1
 				crankAccum = 0
 				local target = math.max(1, math.min(MAX_PATTERNS,
