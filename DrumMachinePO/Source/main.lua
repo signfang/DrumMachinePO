@@ -25,25 +25,10 @@ crankShadowSlot    = nil   -- which chainStep position was shadowed, so we can r
 
 performanceMode = false   -- global; checked by every input handler
 
--- ---- Debug status state -----------------------------------------
--- Tracks the live input state shown on the performance screen.
+-- perfStatus: kept for held-button tracking used by perf handlers
 local perfStatus = {
-	lastEvent  = "—",          -- most recent input event label
-	crankTotal = 0,            -- cumulative crank degrees since entering perf mode
-	-- per-button held state (true while pressed)
 	held = { up=false, down=false, left=false, right=false, a=false, b=false },
 }
-
-local function perfStatusString()
-	-- Build a compact held-buttons string, e.g. "A  B  LEFT"
-	local held = {}
-	local order = { "up", "down", "left", "right", "a", "b" }
-	local labels = { up="UP", down="DOWN", left="LEFT", right="RIGHT", a="A", b="B" }
-	for _, k in ipairs(order) do
-		if perfStatus.held[k] then held[#held+1] = labels[k] end
-	end
-	return #held > 0 and table.concat(held, "  ") or "none"
-end
 
 
 -- ============================================================
@@ -655,61 +640,9 @@ local function drawPatternUI()
 	end
 end
 
--- ---- Draw -------------------------------------------------------
-local function drawPerformanceMode()
-	gfx.lockFocus(grid)
-
-	-- Black background (display is inverted, so kColorWhite = visually black)
-	gfx.setColor(gfx.kColorWhite)
-	gfx.fillRect(0, 0, 400, 240)
-
-
-
-
-	-- All text draws in kColorBlack = visually white on inverted display
-	gfx.setColor(gfx.kColorBlack)
-
-
-	--[[
-	-- Title
-	gfx.drawText("*PERFORMANCE MODE*", 8, 6)
-
-	-- Separator
-	gfx.setLineWidth(1)
-	gfx.drawLine(0, 22, 400, 22)
-
-	-- Debug block
-	local lineH = 22
-	local x, y = 8, 30
-
-	gfx.drawText("Last event:", x, y)
-	gfx.drawText("*" .. perfStatus.lastEvent .. "*", x + 100, y)
-
-	y = y + lineH
-	gfx.drawText("Held:", x, y)
-	gfx.drawText(perfStatusString(), x + 100, y)
-
-	y = y + lineH
-	gfx.drawText("Crank total:", x, y)
-	gfx.drawText(string.format("*%.1f°*", perfStatus.crankTotal), x + 100, y)
-
-	y = y + lineH
-	gfx.drawText("Crank angle:", x, y)
-	gfx.drawText(string.format("*%.1f°*", playdate.getCrankPosition()), x + 100, y)
-
-	-- Footer separator
-	gfx.drawLine(0, 210, 400, 210)
-	gfx.drawText("Menu > Performance to exit", 8, 215)
-
-	gfx.unlockFocus()
-
-	]]--
-
-	
-end
-
-
-
+-- drawPerformanceMode is defined later in the performance mode section;
+-- declared here so drawGrid() can call it as a forward reference.
+local drawPerformanceMode
 
 function drawGrid()
 	if performanceMode then drawPerformanceMode(); return end
@@ -1258,81 +1191,297 @@ end)
 -- ============================================================
 -- PERFORMANCE MODE
 --
--- When performanceMode is true, ALL button inputs and crank
--- events are routed exclusively to the performance handler
--- functions below. The rest of the input system is bypassed.
+-- D-pad: each direction triggers a pre-assigned pattern chain.
+--   Left=chain1  Up=chain2  Right=chain3  Down=chain4
+--   Press mid-chain: finishes current pattern, then switches.
+--   Hold direction + crank: reassigns which chain that direction plays.
 --
--- Enter/exit via the system menu item "Performance".
+-- B: start/stop (tap) / rewind to chain start (double-tap, stopped only)
+-- A: cycle effect focus  BPM→Swing→BPM…  (Filter/Delay/Reverb TBD)
+--    Crank controls the focused effect.
+--    Double-tap A: reverse cycle direction.
 -- ============================================================
 
+-- ---- Effect objects for performance mode --------------------
+-- Two-pole filter for LPF/HPF sweep (SDK 3.0.3: playdate.sound.twopolefilter)
+-- ---- Performance state --------------------------------------
 
--- ---- Input stubs ------------------------------------------------
--- These functions are called exclusively when performanceMode == true.
--- Rename, expand, or replace them to implement your performance logic.
+-- D-pad → chain index assignment (1-indexed into chains[])
+local perfDirChain = { left=1, up=2, right=3, down=4 }
+local perfDirNames = { left="LEFT", up="UP", right="RIGHT", down="DOWN" }
+
+-- Which direction is currently held (for crank-reassign)
+local perfHeldDir  = nil   -- "left"|"up"|"right"|"down" or nil
+
+-- Pending chain switch: set when user presses a dir mid-chain.
+-- Applied at the next bar boundary (step 16→1) in update().
+local perfPendingChainIdx = nil
+
+-- Crank accumulator (reused from grid mode pattern)
+local perfCrankAccum = 0
+
+-- Effect focus cycling
+-- Order: BPM → Swing → (wrap)
+local PERF_FX_NAMES  = { "BPM", "Swing" , "No effects"}
+local perfFxIndex    = 1    -- current focused effect (1-based)
+local perfFxDir      = 1    -- +1 = forward, -1 = reverse cycle
+
+-- A double-tap state
+local perfLastATapMs = 0
+
+-- B double-tap state (rewind)
+local perfLastBTapMs = 0
+local perfHeldDirCrankUsed = false  -- true if crank fired while a dir was held
+
+-- ---- Helpers ------------------------------------------------
+
+-- Clamp helper
+local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
+
+-- Apply the focused effect change given a normalised crank delta direction (+1/-1)
+local function perfApplyFxCrank(dir)
+	local fx = PERF_FX_NAMES[perfFxIndex]
+	if fx == "BPM" then
+		bpmValue = clamp(bpmValue + dir * 2, 10, 300)
+		setBPM(bpmValue)
+	elseif fx == "Swing" then
+		swingAmount = clamp(swingAmount + dir * 0.05, 0.0, 0.75)
+		applySwingToAllTracks()
+	end
+end
+
+-- Switch performance chain immediately (start from step 1)
+local function perfSwitchChain(chainIdx)
+	perfPendingChainIdx = nil
+	currentChainIndex   = chainIdx
+	chainList           = chains[chainIdx]
+	chainEnabled        = true
+	chainStep           = 1
+	currentPattern      = chainList[1]
+	loadPatternIntoSequence(currentPattern)
+	sequence:goToStep(1)
+	if not isRunning then
+		isRunning = true
+		sequence:play()
+	end
+	drawPerformanceMode()
+end
+
+-- Queue a chain switch for next bar boundary
+local function perfQueueChain(chainIdx)
+	perfPendingChainIdx = chainIdx
+	drawPerformanceMode()
+end
+
+-- ---- Draw ---------------------------------------------------
+drawPerformanceMode = function()
+	gfx.lockFocus(grid)
+	gfx.setColor(gfx.kColorWhite)
+	gfx.fillRect(0, 0, 400, 240)
+	gfx.setColor(gfx.kColorBlack)
+
+	-- Status line 1: chain assignments
+	local dirOrder = { "left", "up", "right", "down" }
+	local parts = {}
+	for _, dir in ipairs(dirOrder) do
+		parts[#parts+1] = string.upper(dir:sub(1,1)) .. ":" .. perfDirChain[dir]
+	end
+	gfx.drawText(table.concat(parts, " "), 4, 2)
+
+	-- Status line 2: active chain / pattern / pending
+	local chainTag = "Current Chain:" .. currentChainIndex
+		.. " / Current Pat:" .. currentPattern
+	if perfPendingChainIdx then
+		chainTag = chainTag .. " >" .. perfPendingChainIdx
+	end
+	local playTag = isRunning and "PLAY" or "STOP"
+	gfx.drawText(chainTag .. "  " .. playTag, 4, 18)
+
+	-- Status line 3: active effect + value
+	local fx = PERF_FX_NAMES[perfFxIndex]
+	local fxVal = ""
+	if fx == "BPM" then
+		fxVal = tostring(bpmValue)
+	elseif fx == "Swing" then
+		fxVal = math.floor(swingAmount * 100 + 0.5) .. "%"
+	end
+	local cycleArrow = perfFxDir == 1 and ">" or "<"
+	gfx.drawText("FX " .. cycleArrow .. "[" .. fx .. "] " .. fxVal, 4, 34)
+
+	-- Status line 4: debug / held dir
+	local heldStr = perfHeldDir and ("Hold:" .. perfHeldDir) or ""
+	gfx.drawText(heldStr, 4, 50)
+
+	-- Button hints
+	gfx.drawLine(0, 180, 400, 180)
+	gfx.drawText("D-pad:play assigned pattern chains", 4, 182)
+	gfx.drawText("D-pad hold + crank:re-assign pattern chains", 4, 199)
+	gfx.drawText("A/AA:cycle fx, B:play/stop, BB:rewind crank:fx val", 4, 216)
+
+	gfx.unlockFocus()
+end
+
+-- ---- Input handlers -----------------------------------------
+
+
 
 local function perfUpDown()
-	perfStatus.lastEvent = "UP down"
 	perfStatus.held.up   = true
-	drawPerformanceMode()
+	perfHeldDir          = "up"
+	perfHeldDirCrankUsed = false
 end
 local function perfUpUp()
-	perfStatus.lastEvent = "UP up"
-	perfStatus.held.up   = false
+	perfStatus.held.up = false
+	if perfHeldDir == "up" then
+		perfHeldDir = nil
+		if not perfHeldDirCrankUsed then
+			local ci = perfDirChain["up"]
+			if isRunning and currentChainIndex ~= ci then
+				perfQueueChain(ci)
+			else
+				perfSwitchChain(ci)
+			end
+		end
+	end
+	perfCrankAccum = 0
 	drawPerformanceMode()
 end
+
 local function perfDownDown()
-	perfStatus.lastEvent  = "DOWN down"
-	perfStatus.held.down  = true
-	drawPerformanceMode()
+	perfStatus.held.down   = true
+	perfHeldDir          = "down"
+	perfHeldDirCrankUsed = false
 end
 local function perfDownUp()
-	perfStatus.lastEvent  = "DOWN up"
-	perfStatus.held.down  = false
+	perfStatus.held.down = false
+	if perfHeldDir == "down" then
+		perfHeldDir = nil
+		if not perfHeldDirCrankUsed then
+			local ci = perfDirChain["down"]
+			if isRunning and currentChainIndex ~= ci then
+				perfQueueChain(ci)
+			else
+				perfSwitchChain(ci)
+			end
+		end
+	end
+	perfCrankAccum = 0
 	drawPerformanceMode()
 end
+
+
 local function perfLeftDown()
-	perfStatus.lastEvent  = "LEFT down"
-	perfStatus.held.left  = true
-	drawPerformanceMode()
+	perfStatus.held.left   = true
+	perfHeldDir          = "left"
+	perfHeldDirCrankUsed = false
 end
 local function perfLeftUp()
-	perfStatus.lastEvent  = "LEFT up"
-	perfStatus.held.left  = false
+	perfStatus.held.left = false
+	if perfHeldDir == "left" then
+		perfHeldDir = nil
+		if not perfHeldDirCrankUsed then
+			local ci = perfDirChain["left"]
+			if isRunning and currentChainIndex ~= ci then
+				perfQueueChain(ci)
+			else
+				perfSwitchChain(ci)
+			end
+		end
+	end
+	perfCrankAccum = 0
 	drawPerformanceMode()
 end
+
 local function perfRightDown()
-	perfStatus.lastEvent   = "RIGHT down"
-	perfStatus.held.right  = true
-	drawPerformanceMode()
+	perfStatus.held.right   = true
+	perfHeldDir          = "right"
+	perfHeldDirCrankUsed = false
 end
 local function perfRightUp()
-	perfStatus.lastEvent   = "RIGHT up"
-	perfStatus.held.right  = false
+	perfStatus.held.right = false
+	if perfHeldDir == "right" then
+		perfHeldDir = nil
+		if not perfHeldDirCrankUsed then
+			local ci = perfDirChain["right"]
+			if isRunning and currentChainIndex ~= ci then
+				perfQueueChain(ci)
+			else
+				perfSwitchChain(ci)
+			end
+		end
+	end
+	perfCrankAccum = 0
 	drawPerformanceMode()
 end
+
+
 local function perfADown()
-	perfStatus.lastEvent = "A down"
-	perfStatus.held.a    = true
-	drawPerformanceMode()
+	perfStatus.held.a = true
 end
 local function perfAUp()
-	perfStatus.lastEvent = "A up"
-	perfStatus.held.a    = false
+	perfStatus.held.a = false
+	local now = playdate.getCurrentTimeMilliseconds()
+	local isDouble = (now - perfLastATapMs) < DOUBLE_TAP_MS
+	perfLastATapMs = now
+	if isDouble then
+		-- Reverse cycle direction
+		perfFxDir = -perfFxDir
+	else
+		-- Advance to next effect in current direction
+		perfFxIndex = ((perfFxIndex - 1 + perfFxDir) % #PERF_FX_NAMES) + 1
+	end
 	drawPerformanceMode()
 end
+
 local function perfBDown()
-	perfStatus.lastEvent = "B down"
-	perfStatus.held.b    = true
-	drawPerformanceMode()
+	perfStatus.held.b = true
 end
 local function perfBUp()
-	perfStatus.lastEvent = "B up"
-	perfStatus.held.b    = false
+	perfStatus.held.b = false
+	local now = playdate.getCurrentTimeMilliseconds()
+	local isDouble = (not isRunning) and (now - perfLastBTapMs) < DOUBLE_TAP_MS
+	perfLastBTapMs = now
+	if isDouble then
+		-- Rewind to start of current chain
+		sequence:goToStep(1)
+		chainStep      = 1
+		currentPattern = chainList[1]
+		loadPatternIntoSequence(currentPattern)
+		perfPendingChainIdx = nil
+	else
+		-- Start / stop
+		isRunning = not isRunning
+		if isRunning then
+			updatePOSyncTrack()
+			sequence:play()
+		else
+			sequence:stop()
+			perfPendingChainIdx = nil
+		end
+	end
 	drawPerformanceMode()
 end
+
 local function perfCranked(change, acceleratedChange)
-	perfStatus.crankTotal = perfStatus.crankTotal + change
-	perfStatus.lastEvent  = string.format("CRANK %+.1f°", change)
+	perfCrankAccum = perfCrankAccum + change
+	if perfHeldDir ~= nil then
+		-- Hold + crank: reassign which chain index this direction plays
+		if math.abs(perfCrankAccum) >= 30 then
+			local dir2 = perfCrankAccum > 0 and 1 or -1
+			perfCrankAccum = 0
+			perfHeldDirCrankUsed = true
+			perfDirChain[perfHeldDir] = clamp(
+				perfDirChain[perfHeldDir] + dir2, 1, MAX_CHAINS)
+		end
+	else
+		-- Free crank: control active effect
+		local threshold = 15
+		if math.abs(perfCrankAccum) >= threshold then
+			local dir2 = perfCrankAccum > 0 and 1 or -1
+			perfCrankAccum = 0
+			perfApplyFxCrank(dir2)
+		end
+	end
 	drawPerformanceMode()
 end
 
@@ -1340,12 +1489,16 @@ end
 menu:addMenuItem("Performance", function()
 	performanceMode = not performanceMode
 	if performanceMode then
-		-- Reset debug state for a clean display
-		perfStatus.lastEvent  = "—"
-		perfStatus.crankTotal = 0
-		perfStatus.held = { up=false, down=false, left=false, right=false, a=false, b=false }
-		-- Ensure we are not stuck inside pattern UI
-		uiMode = "grid"
+		-- Reset transient state
+		perfStatus.held     = { up=false, down=false, left=false, right=false, a=false, b=false }
+		perfHeldDir         = nil
+		perfPendingChainIdx = nil
+		perfCrankAccum      = 0
+		perfFxIndex         = 1
+		perfFxDir           = 1
+		perfLastATapMs      = 0
+		perfLastBTapMs      = 0
+		uiMode              = "grid"
 		drawPerformanceMode()
 	else
 		drawGrid()
@@ -1371,12 +1524,31 @@ function playdate.update()
 	--print("Current step:",step)
 	if chainEnabled and #chainList > 1 and isRunning then
 		if step == NUM_STEPS and lastStepForChain == NUM_STEPS - 1 then
-			chainStep = chainStep % #chainList + 1
+			-- Performance mode: apply queued chain switch first
+			if performanceMode and perfPendingChainIdx ~= nil then
+				currentChainIndex   = perfPendingChainIdx
+				chainList           = chains[currentChainIndex]
+				chainStep           = 1
+				perfPendingChainIdx = nil
+			else
+				chainStep = chainStep % #chainList + 1
+			end
 			saveCurrentPatternFromTracks()
 			currentPattern = chainList[chainStep]
 			loadPatternIntoSequence(currentPattern)
 			chainList = chains[currentChainIndex]   -- re-point alias defensively
 			drawGrid()
+		end
+	elseif performanceMode and perfPendingChainIdx ~= nil then
+		-- Chain has only 1 step (or chain disabled): apply pending switch immediately at bar wrap
+		if step == 1 and lastStepForChain == NUM_STEPS then
+			currentChainIndex   = perfPendingChainIdx
+			chainList           = chains[currentChainIndex]
+			chainStep           = 1
+			perfPendingChainIdx = nil
+			currentPattern      = chainList[1]
+			loadPatternIntoSequence(currentPattern)
+			drawPerformanceMode()
 		end
 	end
 	lastStepForChain = step
