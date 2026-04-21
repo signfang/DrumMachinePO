@@ -29,7 +29,13 @@ performanceMode = false   -- global; checked by every input handler
 local perfStatus = {
 	held = { up=false, down=false, left=false, right=false, a=false, b=false },
 }
-
+-- Stop any voices that may be sustaining from the previous pattern.
+-- Called immediately after loadPatternIntoSequence on a chain advance.
+local function cutActiveVoices()
+    for _, tr in ipairs(tracks) do
+        tr.inst:allNotesOff()
+    end
+end
 
 -- ============================================================
 -- TRACK / INSTRUMENT SETUP
@@ -100,7 +106,7 @@ end
 
 local LEVEL_INCREMENTS = 9
 local NUM_STEPS        = 16
-local MAX_PATTERNS     = 8
+local MAX_PATTERNS     = 16
 
 -- ============================================================
 -- MULTI-PATTERN STORAGE
@@ -428,7 +434,7 @@ local MAX_SAVE_SLOTS       = 8
 
 
 -- Pattern UI layout (all Y positions explicit, no derived overlaps)
-local PAT_BOX_W   = 36   -- width of each pattern box
+local PAT_BOX_W   = 18   -- width of each pattern box
 local PAT_BOX_H   = 24   -- height of each pattern box
 local PAT_START_X = 4    -- left margin
 
@@ -523,7 +529,7 @@ local function drawPatternUI()
 
 	-- Chain slots
 	local slotOffX = PAT_START_X + PLAY_W + 4
-	local SLOT_W   = 24
+	local SLOT_W   = 18
 	local SLOT_GAP = 4
 
 	for ci = 1, #chainList do
@@ -731,7 +737,8 @@ function drawGrid()
 
 		end
 		
-		gfx.drawText("C:" .. currentChainIndex, STATUS_X, ROW_HEIGHT*13)	
+		local chainTag2 = chainEnabled and "C:" .. currentChainIndex or ""
+		gfx.drawText(chainTag2, STATUS_X, ROW_HEIGHT*13)	
 	elseif uiMode == "pattern" then
 		drawPatternUI()
 	end
@@ -1185,12 +1192,6 @@ end
 local menu = playdate.getSystemMenu()
 
 
-menu:addMenuItem("PTNs/settings", function()
-	performanceMode = false   -- leaving performance mode via any other menu item
-	uiMode = "pattern"
-	patternUIRow = 1
-	drawGrid()
-end)
 
 -- ============================================================
 -- PERFORMANCE MODE
@@ -1263,6 +1264,7 @@ local function perfSwitchChain(chainIdx)
 	chainStep           = 1
 	currentPattern      = chainList[1]
 	loadPatternIntoSequence(currentPattern)
+	cutActiveVoices()
 	sequence:goToStep(1)
 	if not isRunning then
 		isRunning = true
@@ -1490,24 +1492,6 @@ local function perfCranked(change, acceleratedChange)
 end
 
 -- System menu toggle
-menu:addMenuItem("Performance", function()
-	performanceMode = not performanceMode
-	if performanceMode then
-		-- Reset transient state
-		perfStatus.held     = { up=false, down=false, left=false, right=false, a=false, b=false }
-		perfHeldDir         = nil
-		perfPendingChainIdx = nil
-		perfCrankAccum      = 0
-		perfFxIndex         = 1
-		perfFxDir           = 1
-		perfLastATapMs      = 0
-		perfLastBTapMs      = 0
-		uiMode              = "grid"
-		drawPerformanceMode()
-	else
-		drawGrid()
-	end
-end)
 
 
 
@@ -1526,6 +1510,30 @@ function playdate.update()
 
 	-- Chain advancement: when step wraps from NUM_STEPS back to 1
 	--print("Current step:",step)
+	if isRunning and step == NUM_STEPS and lastStepForChain == NUM_STEPS - 1 then
+		if performanceMode and perfPendingChainIdx ~= nil then
+			-- Switch to the queued chain
+			currentChainIndex   = perfPendingChainIdx
+			chainList           = chains[currentChainIndex]
+			chainStep           = 1
+			perfPendingChainIdx = nil
+		elseif chainEnabled and #chainList > 1 then
+			-- Normal chain advance
+			chainStep = chainStep % #chainList + 1
+		end
+		-- Always save + reload at bar boundary (catches single-pattern chains too)
+		saveCurrentPatternFromTracks()
+		currentPattern = chainList[chainStep]
+		loadPatternIntoSequence(currentPattern)
+		cutActiveVoices()
+		chainList = chains[currentChainIndex]
+		if performanceMode then
+			drawPerformanceMode()
+		else
+			drawGrid()
+		end
+	end
+	--[[
 	if chainEnabled and #chainList > 1 and isRunning then
 		if step == NUM_STEPS and lastStepForChain == NUM_STEPS - 1 then
 			-- Performance mode: apply queued chain switch first
@@ -1540,6 +1548,7 @@ function playdate.update()
 			saveCurrentPatternFromTracks()
 			currentPattern = chainList[chainStep]
 			loadPatternIntoSequence(currentPattern)
+			cutActiveVoices()
 			chainList = chains[currentChainIndex]   -- re-point alias defensively
 			drawGrid()
 		end
@@ -1552,9 +1561,11 @@ function playdate.update()
 			perfPendingChainIdx = nil
 			currentPattern      = chainList[1]
 			loadPatternIntoSequence(currentPattern)
+			cutActiveVoices()
 			drawPerformanceMode()
 		end
 	end
+	]]--
 	lastStepForChain = step
 
 	if performanceMode then
@@ -2178,18 +2189,45 @@ function playdate.gameWillTerminate()
 	saveProject(0)
 end
 
+
+menu:addMenuItem("Performance", function()
+	performanceMode = not performanceMode
+	if performanceMode then
+		-- Reset transient state
+		perfStatus.held     = { up=false, down=false, left=false, right=false, a=false, b=false }
+		perfHeldDir         = nil
+		perfPendingChainIdx = nil
+		perfCrankAccum      = 0
+		perfFxIndex         = 1
+		perfFxDir           = 1
+		perfLastATapMs      = 0
+		perfLastBTapMs      = 0
+		uiMode              = "grid"
+		drawPerformanceMode()
+	else
+		drawGrid()
+	end
+end)
+
+menu:addMenuItem("PTNs/settings", function()
+	performanceMode = false   -- leaving performance mode via any other menu item
+	uiMode = "pattern"
+	patternUIRow = 1
+	drawGrid()
+end)
 -- ============================================================
 -- INITIAL DRAW
 -- ============================================================
 
-if not playdate.file.isdir("Shared") then
-    playdate.file.mkdir("Shared")
+-- AFTER
+if not playdate.file.isdir("/Shared/DrumMachinePO") then
+    playdate.file.mkdir("/Shared/DrumMachinePO")
 end
-if not playdate.file.isdir("Shared/Projects") then
-    playdate.file.mkdir("Shared/Projects")
+if not playdate.file.isdir("/Shared/DrumMachinePO/Projects") then
+    playdate.file.mkdir("/Shared/DrumMachinePO/Projects")
 end
-if not playdate.file.isdir("Shared/Samples") then
-    playdate.file.mkdir("Shared/Samples")
+if not playdate.file.isdir("/Shared/DrumMachinePO/Samples") then
+    playdate.file.mkdir("/Shared/DrumMachinePO/Samples")
 end
 
 drawGrid()
