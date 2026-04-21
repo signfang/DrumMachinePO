@@ -42,7 +42,7 @@ end
 -- ============================================================
 -- Extensions to probe, in priority order.
 local USER_SAMPLE_EXTS = { ".wav", ".aiff", ".mp3" }
-local USER_SAMPLE_DIR  = "/Shared/DrumMachinePO/Samples"
+local USER_SAMPLE_DIR  = "/Shared/DrumMachinePO/Samples/"
 
 -- Returns a playdate.sound.sample, preferring a user file over the bundled asset.
 local function loadSampleForTrack(name)
@@ -106,7 +106,7 @@ end
 
 local LEVEL_INCREMENTS = 9
 local NUM_STEPS        = 16
-local MAX_PATTERNS     = 16
+local MAX_PATTERNS     = 18
 
 -- ============================================================
 -- MULTI-PATTERN STORAGE
@@ -435,7 +435,7 @@ local MAX_SAVE_SLOTS       = 8
 
 
 -- Pattern UI layout (all Y positions explicit, no derived overlaps)
-local PAT_BOX_W   = 18   -- width of each pattern box
+local PAT_BOX_W   = 17   -- width of each pattern box
 local PAT_BOX_H   = 24   -- height of each pattern box
 local PAT_START_X = 4    -- left margin
 
@@ -626,9 +626,9 @@ local function drawPatternUI()
 		elseif selectedChainSlot == #chainList + 1 then
 			gfx.drawText("A: add current pat to chain", PAT_START_X, PAT_HELP1_Y)
 		else
-			gfx.drawText("A:set slot / B:del slot", PAT_START_X, PAT_HELP1_Y)
+			gfx.drawText("A:set slot / Hold B 1s:del slot", PAT_START_X, PAT_HELP1_Y)
 		end
-		gfx.drawText("L/R:move / Crank:change val / Up:pats", PAT_START_X, PAT_HELP2_Y)
+		gfx.drawText("L/R:move / Crank:change val / B: Back to grid", PAT_START_X, PAT_HELP2_Y)
 	elseif patternUIRow == 4 then
 		gfx.drawText("L/R: switch pattern chain", PAT_START_X, PAT_HELP1_Y)
 		gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
@@ -1145,7 +1145,7 @@ local function projectFromJSON(jsonStr)
     return proj
 end
 
-local SHARED_PROJECT_DIR = "/Shared/DrumMachinePO/Projects"
+local SHARED_PROJECT_DIR = "/Shared/DrumMachinePO/Projects/"
 
 local function saveProject(slot)
     local proj = projectToTable()
@@ -1215,6 +1215,7 @@ local menu = playdate.getSystemMenu()
 -- D-pad → chain index assignment (1-indexed into chains[])
 local perfDirChain = { left=1, up=2, right=3, down=4 }
 local perfDirNames = { left="LEFT", up="UP", right="RIGHT", down="DOWN" }
+local perfLastDirTapMs = { left=0, up=0, right=0, down=0 }
 
 -- Which direction is currently held (for crank-reassign)
 local perfHeldDir  = nil   -- "left"|"up"|"right"|"down" or nil
@@ -1238,6 +1239,8 @@ local perfLastATapMs = 0
 -- B double-tap state (rewind)
 local perfLastBTapMs = 0
 local perfHeldDirCrankUsed = false  -- true if crank fired while a dir was held
+
+local perfCurrentStep = 1
 
 -- ---- Helpers ------------------------------------------------
 
@@ -1286,6 +1289,16 @@ drawPerformanceMode = function()
 	gfx.setColor(gfx.kColorWhite)
 	gfx.fillRect(0, 0, 400, 240)
 	gfx.setColor(gfx.kColorBlack)
+	--print("perfcurrent:",perfCurrentStep)
+	local phY, phW, phH = 15, 15, 15
+	for i = 1, 16 do
+		local phX = 75 + (i - 1) * (phW + 1)
+		if i == perfCurrentStep then
+			gfx.fillRect(phX, phY, phW, phH)
+		else
+			gfx.drawRect(phX, phY, phW, phH)
+		end
+	end
 
 	-- Status line 1: chain assignments
 	local dirOrder = { "left", "up", "right", "down" }
@@ -1293,7 +1306,7 @@ drawPerformanceMode = function()
 	for _, dir in ipairs(dirOrder) do
 		parts[#parts+1] = string.upper(dir:sub(1,1)) .. ":" .. perfDirChain[dir]
 	end
-	gfx.drawText(table.concat(parts, " "), 4, 2)
+	gfx.drawText(table.concat(parts, " "), 4, 42)
 
 	-- Status line 2: active chain / pattern / pending
 	local chainTag = "Current Chain:" .. currentChainIndex
@@ -1302,7 +1315,7 @@ drawPerformanceMode = function()
 		chainTag = chainTag .. " >" .. perfPendingChainIdx
 	end
 	local playTag = isRunning and "PLAY" or "STOP"
-	gfx.drawText(chainTag .. "  " .. playTag, 4, 18)
+	gfx.drawText(chainTag .. "  " .. playTag, 4, 58)
 
 	-- Status line 3: active effect + value
 	local fx = PERF_FX_NAMES[perfFxIndex]
@@ -1313,17 +1326,20 @@ drawPerformanceMode = function()
 		fxVal = math.floor(swingAmount * 100 + 0.5) .. "%"
 	end
 	local cycleArrow = perfFxDir == 1 and ">" or "<"
-	gfx.drawText("FX " .. cycleArrow .. "[" .. fx .. "] " .. fxVal, 4, 34)
+	gfx.drawText("FX " .. cycleArrow .. "[" .. fx .. "] " .. fxVal, 4, 74)
 
 	-- Status line 4: debug / held dir
 	local heldStr = perfHeldDir and ("Hold:" .. perfHeldDir) or ""
-	gfx.drawText(heldStr, 4, 50)
+	gfx.drawText(heldStr, 4, 90)
 
 	-- Button hints
-	gfx.drawLine(0, 180, 400, 180)
-	gfx.drawText("D-pad:play assigned pattern chains", 4, 182)
-	gfx.drawText("D-pad hold + crank:re-assign pattern chains", 4, 199)
-	gfx.drawText("A/AA:cycle fx, B:play/stop, BB:rewind crank:fx val", 4, 216)
+	gfx.drawLine(0, 160, 400, 160)
+	local firstLine = 162
+	local lineDist = 17
+	gfx.drawText("D-pad:play assigned pattern chains (queue)", 4, firstLine)
+	gfx.drawText("Double tap D-pad:play pattern chains (immediate)", 4, firstLine+lineDist)
+	gfx.drawText("D-pad hold + crank:re-assign pattern chains", 4, firstLine+lineDist*2)
+	gfx.drawText("A/AA:cycle fx, B:play/stop, BB:rewind crank:fx val", 4, firstLine+lineDist*3)
 
 	gfx.unlockFocus()
 end
@@ -1337,17 +1353,29 @@ local function perfUpDown()
 	perfHeldDir          = "up"
 	perfHeldDirCrankUsed = false
 end
+
 local function perfUpUp()
 	perfStatus.held.up = false
 	if perfHeldDir == "up" then
 		perfHeldDir = nil
 		if not perfHeldDirCrankUsed then
 			local ci = perfDirChain["up"]
+            local now = playdate.getCurrentTimeMilliseconds()
+			print("now:",now,"down pressed:",perfLastDirTapMs["up"])
+            local isDouble = (now - perfLastDirTapMs["up"]) < DOUBLE_TAP_MS
+            perfLastDirTapMs["up"] = now
+            if isDouble or not isRunning  then
+                perfSwitchChain(ci)
+            else
+                perfQueueChain(ci)
+            end
+			--[[			
 			if isRunning and currentChainIndex ~= ci then
 				perfQueueChain(ci)
 			else
 				perfSwitchChain(ci)
 			end
+			]]--
 		end
 	end
 	perfCrankAccum = 0
@@ -1365,11 +1393,21 @@ local function perfDownUp()
 		perfHeldDir = nil
 		if not perfHeldDirCrankUsed then
 			local ci = perfDirChain["down"]
+            local now = playdate.getCurrentTimeMilliseconds()
+            local isDouble = (now - perfLastDirTapMs["down"]) < DOUBLE_TAP_MS
+            perfLastDirTapMs["down"] = now
+            if isDouble or not isRunning  then
+                perfSwitchChain(ci)
+            else
+                perfQueueChain(ci)
+            end			
+			--[[
 			if isRunning and currentChainIndex ~= ci then
 				perfQueueChain(ci)
 			else
 				perfSwitchChain(ci)
 			end
+			]]--
 		end
 	end
 	perfCrankAccum = 0
@@ -1388,11 +1426,21 @@ local function perfLeftUp()
 		perfHeldDir = nil
 		if not perfHeldDirCrankUsed then
 			local ci = perfDirChain["left"]
+            local now = playdate.getCurrentTimeMilliseconds()
+            local isDouble = (now - perfLastDirTapMs["left"]) < DOUBLE_TAP_MS
+            perfLastDirTapMs["left"] = now
+            if isDouble or not isRunning then
+                perfSwitchChain(ci)
+            else
+                perfQueueChain(ci)
+            end
+			--[[
 			if isRunning and currentChainIndex ~= ci then
 				perfQueueChain(ci)
 			else
 				perfSwitchChain(ci)
 			end
+			]]--
 		end
 	end
 	perfCrankAccum = 0
@@ -1410,11 +1458,21 @@ local function perfRightUp()
 		perfHeldDir = nil
 		if not perfHeldDirCrankUsed then
 			local ci = perfDirChain["right"]
+            local now = playdate.getCurrentTimeMilliseconds()
+            local isDouble = (now - perfLastDirTapMs["right"]) < DOUBLE_TAP_MS
+            perfLastDirTapMs["right"] = now
+            if isDouble or not isRunning then
+                perfSwitchChain(ci)
+            else
+                perfQueueChain(ci)
+            end
+			--[[
 			if isRunning and currentChainIndex ~= ci then
 				perfQueueChain(ci)
 			else
 				perfSwitchChain(ci)
 			end
+			]]--
 		end
 	end
 	perfCrankAccum = 0
@@ -1562,9 +1620,15 @@ function playdate.update()
 		nextPattern=nil
 	end
 
+	perfCurrentStep = step
+
 	if performanceMode then
 		-- Performance mode: blit the static performance screen every frame.
 		-- The sequencer keeps running (chain logic above still executes).
+		if step ~= laststep then
+        	laststep = step
+        	drawPerformanceMode()
+    	end
 		grid:draw(0, 0)
 		return
 	end
@@ -1638,7 +1702,23 @@ function playdate.update()
 			end)
 			drawGrid()
 		end
-	end
+	elseif uiMode == "pattern" and patternUIRow == 3
+		and selectedChainSlot >= 1 and selectedChainSlot <= #chainList
+		and not patternBHoldUsed
+		and dialogMessage == nil
+		and playdate.buttonIsPressed(playdate.kButtonB) then
+			patternBHoldFrames += 1
+			if patternBHoldFrames >= CLEAR_HOLD_FRAMES then
+				patternBHoldUsed   = true
+				patternBHoldFrames = 0
+				table.remove(chainList, selectedChainSlot)
+				if #chainList == 0 then chainList[1] = 1 end
+				selectedChainSlot = math.min(selectedChainSlot, #chainList)
+				drawGrid()
+			end
+		end
+
+	
 
 	-- Reusable dialog: draw on top of everything when active
 	if dialogMessage ~= nil then
@@ -1776,6 +1856,7 @@ local function patternModeB()
 	end
 
 	-- Row 3: delete selected chain slot; otherwise fall through to back-to-grid
+	--[[
 	if patternUIRow == 3 and selectedChainSlot > 0 and selectedChainSlot <= #chainList then
 		if #chainList > 1 then
 			table.remove(chainList, selectedChainSlot)
@@ -1784,6 +1865,7 @@ local function patternModeB()
 		drawGrid()
 		return
 	end
+	]]--
 
 	-- All rows (including row 1 short-tap): B returns to grid
 	uiMode = "grid"
