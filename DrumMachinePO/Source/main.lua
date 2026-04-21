@@ -122,6 +122,7 @@ end
 
 MAX_CHAINS        = 8
 currentPattern    = 1
+
 -- Pre-allocate MAX_CHAINS chains; each starts with a single-slot chain pointing at pattern 1.
 -- This makes every slot immediately usable without needing an "add chain" action.
 chains            = {}
@@ -1502,6 +1503,8 @@ end
 local laststep         = 0
 local lastStepForChain = 0  -- used to detect wrap from step 16 -> step 1
 
+
+local nextPattern = nil
 function playdate.update()
 	local rawStep = sequence:getCurrentStep()
 	-- Convert internal scaled step back to a 1-based grid column (1..NUM_STEPS).
@@ -1509,7 +1512,9 @@ function playdate.update()
 	local step = math.ceil(rawStep / STEP_SCALE)
 
 	-- Chain advancement: when step wraps from NUM_STEPS back to 1
-	--print("Current step:",step)
+	--print("Current raw step:",rawStep, "Current step:",step, "Current pattern:", currentPattern, "LastStep/forchain:",laststep, lastStepForChain)
+	
+
 
 	if chainEnabled and #chainList > 1 and isRunning then
 		if step == NUM_STEPS and lastStepForChain == NUM_STEPS - 1 then
@@ -1522,12 +1527,10 @@ function playdate.update()
 			else
 				chainStep = chainStep % #chainList + 1
 			end
-			saveCurrentPatternFromTracks()
-			currentPattern = chainList[chainStep]
-			loadPatternIntoSequence(currentPattern)
-			cutActiveVoices()
+			nextPattern = chainList[chainStep]			
 			chainList = chains[currentChainIndex]   -- re-point alias defensively
 			drawGrid()
+			
 		end
 	elseif performanceMode and perfPendingChainIdx ~= nil then
 		-- Chain has only 1 step (or chain disabled): apply pending switch immediately at bar wrap
@@ -1536,14 +1539,28 @@ function playdate.update()
 			chainList           = chains[currentChainIndex]
 			chainStep           = 1
 			perfPendingChainIdx = nil
-			currentPattern      = chainList[1]
-			loadPatternIntoSequence(currentPattern)
-			cutActiveVoices()
+			nextPattern      = chainList[1]
+			--currentPattern      = chainList[1]
+			--loadPatternIntoSequence(currentPattern)
+			--cutActiveVoices()
 			drawPerformanceMode()
+			
 		end
 	end
 	
 	lastStepForChain = step
+	--print("visit here")
+
+	if step==1 and nextPattern~=nil then
+		if not performanceMode then
+			saveCurrentPatternFromTracks()
+		end
+		currentPattern = nextPattern
+		loadPatternIntoSequence(currentPattern)
+		cutActiveVoices()
+		
+		nextPattern=nil
+	end
 
 	if performanceMode then
 		-- Performance mode: blit the static performance screen every frame.
