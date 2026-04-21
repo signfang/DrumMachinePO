@@ -42,7 +42,7 @@ end
 -- ============================================================
 -- Extensions to probe, in priority order.
 local USER_SAMPLE_EXTS = { ".wav", ".aiff", ".mp3" }
-local USER_SAMPLE_DIR  = "Shared/Samples/"
+local USER_SAMPLE_DIR  = "/Shared/DrumMachinePO/Samples"
 
 -- Returns a playdate.sound.sample, preferring a user file over the bundled asset.
 local function loadSampleForTrack(name)
@@ -1144,7 +1144,7 @@ local function projectFromJSON(jsonStr)
     return proj
 end
 
-local SHARED_PROJECT_DIR = "Shared/Projects/"
+local SHARED_PROJECT_DIR = "/Shared/DrumMachinePO/Projects"
 
 local function saveProject(slot)
     local proj = projectToTable()
@@ -1510,30 +1510,7 @@ function playdate.update()
 
 	-- Chain advancement: when step wraps from NUM_STEPS back to 1
 	--print("Current step:",step)
-	if isRunning and step == NUM_STEPS and lastStepForChain == NUM_STEPS - 1 then
-		if performanceMode and perfPendingChainIdx ~= nil then
-			-- Switch to the queued chain
-			currentChainIndex   = perfPendingChainIdx
-			chainList           = chains[currentChainIndex]
-			chainStep           = 1
-			perfPendingChainIdx = nil
-		elseif chainEnabled and #chainList > 1 then
-			-- Normal chain advance
-			chainStep = chainStep % #chainList + 1
-		end
-		-- Always save + reload at bar boundary (catches single-pattern chains too)
-		saveCurrentPatternFromTracks()
-		currentPattern = chainList[chainStep]
-		loadPatternIntoSequence(currentPattern)
-		cutActiveVoices()
-		chainList = chains[currentChainIndex]
-		if performanceMode then
-			drawPerformanceMode()
-		else
-			drawGrid()
-		end
-	end
-	--[[
+
 	if chainEnabled and #chainList > 1 and isRunning then
 		if step == NUM_STEPS and lastStepForChain == NUM_STEPS - 1 then
 			-- Performance mode: apply queued chain switch first
@@ -1565,7 +1542,7 @@ function playdate.update()
 			drawPerformanceMode()
 		end
 	end
-	]]--
+	
 	lastStepForChain = step
 
 	if performanceMode then
