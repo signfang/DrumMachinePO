@@ -6,8 +6,7 @@ A simple 16-step sequencer with multi-pattern chaining and Teenage Engineering P
 
 
 
-**Youtube demo video: https://youtu.be/MFBodQwCgpo?si=e0k65MqldogNP85w
-**
+**Youtube demo video: https://youtu.be/MFBodQwCgpo?si=e0k65MqldogNP85w**
 
 
 DrumMachinePO is an enhanced version of Playdate SDK example - DrumMachine - which is just a single-pattern 16-step sequencer. 
