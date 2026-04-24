@@ -120,7 +120,7 @@ for p = 1, MAX_PATTERNS do
 	end
 end
 
-MAX_CHAINS        = 8
+MAX_CHAINS        = 12
 currentPattern    = 1
 
 -- Pre-allocate MAX_CHAINS chains; each starts with a single-slot chain pointing at pattern 1.
@@ -164,7 +164,7 @@ clickSynth:setVolume(1.5)
 poInstrument:addVoice(clickSynth)
 poTrack:setInstrument(poInstrument)
 sequence:addTrack(poTrack)
-local syncOffset = 0   -- in "step units"
+
 
 -- ============================================================
 -- AUDIO CHANNEL ROUTING
@@ -302,7 +302,7 @@ end
 
 
 
-
+local syncOffset = 0   -- in "step units"
 local function updatePOSyncTrack()
 	applyPanRouting()
 
@@ -1574,50 +1574,34 @@ function playdate.update()
 	
 
 
-	if chainEnabled and #chainList > 1 and isRunning then
-		if step == NUM_STEPS and lastStepForChain == NUM_STEPS - 1 then
-			-- Performance mode: apply queued chain switch first
-			if performanceMode and perfPendingChainIdx ~= nil then
-				currentChainIndex   = perfPendingChainIdx
-				chainList           = chains[currentChainIndex]
-				chainStep           = 1
-				perfPendingChainIdx = nil
-			else
-				chainStep = chainStep % #chainList + 1
-			end
-			nextPattern = chainList[chainStep]			
-			chainList = chains[currentChainIndex]   -- re-point alias defensively
-			drawGrid()
-			
-		end
-	elseif performanceMode and perfPendingChainIdx ~= nil then
-		-- Chain has only 1 step (or chain disabled): apply pending switch immediately at bar wrap
-		if step == 1 and lastStepForChain == NUM_STEPS then
+	if isRunning and step == NUM_STEPS and lastStepForChain == NUM_STEPS - 1 then
+		if performanceMode and perfPendingChainIdx ~= nil then
+			-- Performance mode: load immediately so engine never pre-schedules old pattern
 			currentChainIndex   = perfPendingChainIdx
 			chainList           = chains[currentChainIndex]
 			chainStep           = 1
 			perfPendingChainIdx = nil
-			nextPattern      = chainList[1]
-			--currentPattern      = chainList[1]
-			--loadPatternIntoSequence(currentPattern)
-			--cutActiveVoices()
-			drawPerformanceMode()
-			
-		end
-	end
-	
-	lastStepForChain = step
-	--print("visit here")
-
-	if step==1 and nextPattern~=nil then
-		if not performanceMode then
 			saveCurrentPatternFromTracks()
+			currentPattern = chainList[1]
+			loadPatternIntoSequence(currentPattern)
+			cutActiveVoices()
+		elseif chainEnabled and #chainList > 1 then
+			-- Normal mode: defer to step 1 to avoid step-16 note bleed
+			chainStep   = chainStep % #chainList + 1
+			nextPattern = chainList[chainStep]
+			cutActiveVoices()
 		end
+		chainList = chains[currentChainIndex]  -- re-point alias defensively
+		drawGrid()
+	end
+
+	lastStepForChain = step
+
+	if step == 1 and nextPattern ~= nil then
+		saveCurrentPatternFromTracks()
 		currentPattern = nextPattern
 		loadPatternIntoSequence(currentPattern)
-		cutActiveVoices()
-		
-		nextPattern=nil
+		nextPattern = nil
 	end
 
 	perfCurrentStep = step
