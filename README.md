@@ -5,13 +5,17 @@ A simple 16-step sequencer with multi-pattern chaining and Teenage Engineering P
 ![alt text](drummachinepo2.png "title")
 
 
+
+**Youtube demo video: https://youtu.be/MFBodQwCgpo?si=e0k65MqldogNP85w**
+
+
 DrumMachinePO is an enhanced version of Playdate SDK example - DrumMachine - which is just a single-pattern 16-step sequencer. 
 
 
 It adds the following features on top of the DrumMachine example:
 1. Save/Load project
-2. Multi-pattern (up to 8). 
-3. Pattern chaining.
+2. Multi-pattern (up to 18). 
+3. Pattern chaining (up to 8 different pattern chains).
 4. BPM/Swing adjustment 
 5. Pocket Operator (e.g. PO-33 KO!) sync ability.
 6. User-defined samples (instead of built-in sounds, must be done while connected to PC)
@@ -57,15 +61,32 @@ D-PAD: Move around the settings.
 
 A: Select options, or hold to copy pattern (cursor should be on the source pattern. While holding A, press left/right to desired destination patterns)
 
-B: Go back to grid view/delete the pattern chain, or hold to clear pattern.
+B: Go back to grid view, or hold to clear pattern/delete the pattern chain.
 
+
+**Performance mode**
+
+![alt text](Performance.gif "Settings")
+
+In "performance mode", you can play each "pattern chains" that is assigned to each directions of the D-pad.
+
+Control info:
+
+D-PAD: 
+- Tap: Play the currently assigned pattern chain (queue to the pattern end). 
+- Double Tap: Play the assigned pattern immediately
+- Hold Direction+Crank: Change the assigned pattern chain 
+
+A: Cycle through "effects". Only BPM/Swing for now (To be added)
+
+B: Start/Stop playing, Double-tap to go all the way back.
 
 
 **Using user samples**
 
 DrumMachinPO looks for the user sample files when starting up. 
 
-Put sample files in Shared/Samples folder to use it instead of the built-in ones.
+Put sample files in Shared/DrumMachinePO/Samples folder to use it instead of the built-in ones.
 
 Sample names should match the ones in the following list (+ extensions. wav/aiff/mp3 are supported).
 
