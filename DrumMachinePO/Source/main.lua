@@ -52,7 +52,7 @@ local function loadSampleForTrack(name)
         if playdate.file.exists(path) then
             local ok, sample = pcall(playdate.sound.sample.new, path)
             if ok and sample then
-                print("Custom sample loaded: " .. path)
+                --print("Custom sample loaded: " .. path)
                 return sample
             end
         end
@@ -1308,16 +1308,8 @@ drawPerformanceMode = function()
 	end
 	gfx.drawText(table.concat(parts, " "), 4, 42)
 
-	-- Status line 2: active chain / pattern / pending
-	local chainTag = "Current Chain:" .. currentChainIndex
-		.. " / Current Pat:" .. currentPattern
-	if perfPendingChainIdx then
-		chainTag = chainTag .. " >" .. perfPendingChainIdx
-	end
+	-- Status line 2: play state + effect
 	local playTag = isRunning and "PLAY" or "STOP"
-	gfx.drawText(chainTag .. "  " .. playTag, 4, 58)
-
-	-- Status line 3: active effect + value
 	local fx = PERF_FX_NAMES[perfFxIndex]
 	local fxVal = ""
 	if fx == "BPM" then
@@ -1326,11 +1318,44 @@ drawPerformanceMode = function()
 		fxVal = math.floor(swingAmount * 100 + 0.5) .. "%"
 	end
 	local cycleArrow = perfFxDir == 1 and ">" or "<"
-	gfx.drawText("FX " .. cycleArrow .. "[" .. fx .. "] " .. fxVal, 4, 74)
+	gfx.drawText(playTag .. "  FX " .. cycleArrow .. "[" .. fx .. "] " .. fxVal, 4, 58)
 
-	-- Status line 4: debug / held dir
+	-- Chain display: centered, chain name at top, boxes below
+	local BOX_W   = 18
+	local BOX_H   = 20
+	local BOX_GAP = 4
+	local chainLen   = #chainList
+	local totalW     = chainLen * BOX_W + (chainLen - 1) * BOX_GAP
+	local chainStartX = math.floor((400 - totalW) / 2)
+	local chainNameY  = 82
+	local boxY        = chainNameY + 24
+
+	-- Chain name centred above boxes
+	local chainName = "Chain " .. currentChainIndex
+	if perfPendingChainIdx then
+		chainName = chainName .. "  >  Chain " .. perfPendingChainIdx
+	end
+	local nameW = #chainName * 7  -- approx character width for system font
+	gfx.drawText(chainName, math.floor((400 - nameW) / 2), chainNameY)
+
+	-- Draw one box per chain slot
+	for ci = 1, chainLen do
+		local bx = chainStartX + (ci - 1) * (BOX_W + BOX_GAP)
+		local pat = chainList[ci]
+		local isCurrent = (pat == currentPattern and ci == chainStep)
+		if isCurrent then
+			gfx.setLineWidth(3)
+			gfx.drawRect(bx, boxY, BOX_W, BOX_H)
+			gfx.setLineWidth(1)
+		else
+			gfx.drawRect(bx, boxY, BOX_W, BOX_H)
+		end
+		gfx.drawText(tostring(pat), bx + (BOX_W - 7) / 2, boxY + 4)
+	end
+
+	-- Held dir hint
 	local heldStr = perfHeldDir and ("Hold:" .. perfHeldDir) or ""
-	gfx.drawText(heldStr, 4, 90)
+	gfx.drawText(heldStr, 4, boxY + BOX_H + 6)
 
 	-- Button hints
 	gfx.drawLine(0, 160, 400, 160)
@@ -1361,7 +1386,7 @@ local function perfUpUp()
 		if not perfHeldDirCrankUsed then
 			local ci = perfDirChain["up"]
             local now = playdate.getCurrentTimeMilliseconds()
-			print("now:",now,"down pressed:",perfLastDirTapMs["up"])
+			--print("now:",now,"down pressed:",perfLastDirTapMs["up"])
             local isDouble = (now - perfLastDirTapMs["up"]) < DOUBLE_TAP_MS
             perfLastDirTapMs["up"] = now
             if isDouble or not isRunning  then
@@ -1574,34 +1599,50 @@ function playdate.update()
 	
 
 
-	if isRunning and step == NUM_STEPS and lastStepForChain == NUM_STEPS - 1 then
-		if performanceMode and perfPendingChainIdx ~= nil then
-			-- Performance mode: load immediately so engine never pre-schedules old pattern
+	if chainEnabled and #chainList > 1 and isRunning then
+		if step == NUM_STEPS and lastStepForChain == NUM_STEPS - 1 then
+			-- Performance mode: apply queued chain switch first
+			if performanceMode and perfPendingChainIdx ~= nil then
+				currentChainIndex   = perfPendingChainIdx
+				chainList           = chains[currentChainIndex]
+				chainStep           = 1
+				perfPendingChainIdx = nil
+			else
+				chainStep = chainStep % #chainList + 1
+			end
+			nextPattern = chainList[chainStep]			
+			chainList = chains[currentChainIndex]   -- re-point alias defensively
+			drawGrid()
+			
+		end
+	elseif performanceMode and perfPendingChainIdx ~= nil then
+		-- Chain has only 1 step (or chain disabled): apply pending switch immediately at bar wrap
+		if step == 1 and lastStepForChain == NUM_STEPS then
 			currentChainIndex   = perfPendingChainIdx
 			chainList           = chains[currentChainIndex]
 			chainStep           = 1
 			perfPendingChainIdx = nil
-			saveCurrentPatternFromTracks()
-			currentPattern = chainList[1]
-			loadPatternIntoSequence(currentPattern)
-			cutActiveVoices()
-		elseif chainEnabled and #chainList > 1 then
-			-- Normal mode: defer to step 1 to avoid step-16 note bleed
-			chainStep   = chainStep % #chainList + 1
-			nextPattern = chainList[chainStep]
-			cutActiveVoices()
+			nextPattern      = chainList[1]
+			--currentPattern      = chainList[1]
+			--loadPatternIntoSequence(currentPattern)
+			--cutActiveVoices()
+			drawPerformanceMode()
+			
 		end
-		chainList = chains[currentChainIndex]  -- re-point alias defensively
-		drawGrid()
 	end
-
+	
 	lastStepForChain = step
+	--print("visit here")
 
-	if step == 1 and nextPattern ~= nil then
-		saveCurrentPatternFromTracks()
+	if step==1 and nextPattern~=nil then
+		if not performanceMode then
+			saveCurrentPatternFromTracks()
+		end
 		currentPattern = nextPattern
 		loadPatternIntoSequence(currentPattern)
-		nextPattern = nil
+		cutActiveVoices()
+		
+		nextPattern=nil
 	end
 
 	perfCurrentStep = step
