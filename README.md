@@ -15,7 +15,7 @@ DrumMachinePO is an enhanced version of Playdate SDK example - DrumMachine - whi
 It adds the following features on top of the DrumMachine example:
 1. Save/Load project
 2. Multi-pattern (up to 18). 
-3. Pattern chaining (up to 8 different pattern chains).
+3. Pattern chaining (up to 12 different pattern chains).
 4. BPM/Swing adjustment 
 5. Pocket Operator (e.g. PO-33 KO!) sync ability.
 6. User-defined samples (instead of built-in sounds, must be done while connected to PC)
