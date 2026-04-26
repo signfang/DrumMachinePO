@@ -66,7 +66,7 @@ B: Go back to grid view, or hold to clear pattern/delete the pattern chain.
 
 **Performance mode**
 
-![alt text](Performance.gif "Settings")
+![alt text](Performance.gif "Performance")
 
 In "performance mode", you can play each "pattern chains" that is assigned to each directions of the D-pad.
 
