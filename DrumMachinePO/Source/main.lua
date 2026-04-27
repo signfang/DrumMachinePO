@@ -122,6 +122,7 @@ end
 
 MAX_CHAINS        = 12
 currentPattern    = 1
+prevPattern = 1
 
 -- Pre-allocate MAX_CHAINS chains; each starts with a single-slot chain pointing at pattern 1.
 -- This makes every slot immediately usable without needing an "add chain" action.
@@ -272,7 +273,17 @@ local function saveCurrentPatternFromTracks()
 	end
 end
 
+
+edgeNextPattern = nil
+
 local function loadPatternIntoSequence(patIdx)
+	--dest = patIdx
+	-- if currentPattern~=prevPattern and patIdx==currentPattern then
+	-- 	print("Pattern edge:",prevPattern,"->",currentPattern)
+	-- 	edgeNextPattern = patIdx -- to be updated in playdate.update()
+	-- 	dest = prevPattern
+	-- end
+	
 	for ti = 1, #tracks do
 		local pnotes = patterns[patIdx][ti].notes
 		local copy = {}
@@ -1585,59 +1596,47 @@ end
 
 local laststep         = 0
 local lastStepForChain = 0  -- used to detect wrap from step 16 -> step 1
-
+local prevRawStep = 0
 
 local nextPattern = nil
 function playdate.update()
+	
 	local rawStep = sequence:getCurrentStep()
 	-- Convert internal scaled step back to a 1-based grid column (1..NUM_STEPS).
 	-- math.ceil maps internal steps 1..STEP_SCALE → grid 1, STEP_SCALE+1..2×STEP_SCALE → grid 2, etc.
 	local step = math.ceil(rawStep / STEP_SCALE)
+	
 
 	-- Chain advancement: when step wraps from NUM_STEPS back to 1
-	--print("Current raw step:",rawStep, "Current step:",step, "Current pattern:", currentPattern, "LastStep/forchain:",laststep, lastStepForChain)
+	
 	
 
 
-	if chainEnabled and #chainList > 1 and isRunning then
-		if step == NUM_STEPS and lastStepForChain == NUM_STEPS - 1 then
-			-- Performance mode: apply queued chain switch first
-			if performanceMode and perfPendingChainIdx ~= nil then
-				currentChainIndex   = perfPendingChainIdx
-				chainList           = chains[currentChainIndex]
-				chainStep           = 1
-				perfPendingChainIdx = nil
-			else
-				chainStep = chainStep % #chainList + 1
-			end
-			nextPattern = chainList[chainStep]			
-			chainList = chains[currentChainIndex]   -- re-point alias defensively
-			drawGrid()
-			
-		end
-	elseif performanceMode and perfPendingChainIdx ~= nil then
-		-- Chain has only 1 step (or chain disabled): apply pending switch immediately at bar wrap
-		if step == 1 and lastStepForChain == NUM_STEPS then
+
+	if isRunning and step == NUM_STEPS and lastStepForChain == NUM_STEPS - 1 then
+		if performanceMode and perfPendingChainIdx ~= nil then
 			currentChainIndex   = perfPendingChainIdx
 			chainList           = chains[currentChainIndex]
 			chainStep           = 1
 			perfPendingChainIdx = nil
-			nextPattern      = chainList[1]
-			--currentPattern      = chainList[1]
-			--loadPatternIntoSequence(currentPattern)
-			--cutActiveVoices()
-			drawPerformanceMode()
-			
+			nextPattern         = chainList[1]
+		elseif chainEnabled and #chainList > 1 then
+			chainStep   = chainStep % #chainList + 1
+			nextPattern = chainList[chainStep]
 		end
+		chainList = chains[currentChainIndex]   -- re-point alias defensively
+		drawGrid()
 	end
 	
+	--print("Current raw step:",rawStep,", Prev raw step:",prevRawStep)
 	lastStepForChain = step
 	--print("visit here")
-
-	if step==1 and nextPattern~=nil then
+	--print("Current raw step:",rawStep, "Current step:",step, "Current/Next pattern:", currentPattern, nextPattern, "LastStep/forchain:",laststep, lastStepForChain)
+	if step==1 and nextPattern~=nil then	
 		if not performanceMode then
 			saveCurrentPatternFromTracks()
 		end
+		prevPattern = currentPattern		
 		currentPattern = nextPattern
 		loadPatternIntoSequence(currentPattern)
 		cutActiveVoices()
@@ -1645,8 +1644,17 @@ function playdate.update()
 		nextPattern=nil
 	end
 
-	perfCurrentStep = step
 
+	-- handle edge in the next frame
+	if edgeNextPattern ~= nil then 
+		loadPatternIntoSequence(edgeNextPattern)
+		cutActiveVoices()
+		edgeNextPattern=nil
+	end
+	--print("current Step call:", sequence:getCurrentStep())
+
+	perfCurrentStep = step
+	prevRawStep = rawStep
 	if performanceMode then
 		-- Performance mode: blit the static performance screen every frame.
 		-- The sequencer keeps running (chain logic above still executes).
@@ -1744,11 +1752,12 @@ function playdate.update()
 		end
 
 	
-
+	
 	-- Reusable dialog: draw on top of everything when active
 	if dialogMessage ~= nil then
 		drawDialog()
 	end
+	
 end
 
 -- ============================================================
