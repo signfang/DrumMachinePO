@@ -365,7 +365,7 @@ end
 setBPM(bpmValue)
 -- Loop from internal step 1 to the last internal step of the bar.
 -- NUM_STEPS grid steps × STEP_SCALE = total internal steps per bar.
-sequence:setLoops(1, NUM_STEPS * STEP_SCALE, 0)
+sequence:setLoops(1, NUM_STEPS * STEP_SCALE, 1)
 -- sequence:play() is NOT called here; B button starts playback
 
 -- ============================================================
@@ -1270,24 +1270,50 @@ local function perfApplyFxCrank(dir)
 	end
 end
 
+
+local function onBarFinish(seq)
+    if not isRunning then return end
+
+    if performanceMode and perfPendingChainIdx ~= nil then
+        currentChainIndex   = perfPendingChainIdx
+        chainList           = chains[currentChainIndex]
+        chainStep           = 1
+        perfPendingChainIdx = nil
+        currentPattern      = chainList[1]
+    elseif crankQueuedPattern ~= nil then
+        saveCurrentPatternFromTracks()
+        currentPattern     = crankQueuedPattern
+        crankQueuedPattern = nil
+        crankShadowSlot    = nil
+    elseif chainEnabled and #chainList > 1 then
+        saveCurrentPatternFromTracks()
+        chainStep      = chainStep % #chainList + 1
+        currentPattern = chainList[chainStep]
+        chainList      = chains[currentChainIndex]
+    end
+
+    loadPatternIntoSequence(currentPattern)
+    seq:goToStep(1)
+    seq:play(onBarFinish)
+    drawGrid()
+end
 -- Switch performance chain immediately (start from step 1)
 local function perfSwitchChain(chainIdx)
-	perfPendingChainIdx = nil
-	currentChainIndex   = chainIdx
-	chainList           = chains[chainIdx]
-	chainEnabled        = true
-	chainStep           = 1
-	currentPattern      = chainList[1]
-	loadPatternIntoSequence(currentPattern)
-	cutActiveVoices()
-	sequence:goToStep(1)
-	if not isRunning then
-		isRunning = true
-		sequence:play()
-	end
-	drawPerformanceMode()
+    perfPendingChainIdx = nil
+    currentChainIndex   = chainIdx
+    chainList           = chains[chainIdx]
+    chainEnabled        = true
+    chainStep           = 1
+    currentPattern      = chainList[1]
+    sequence:stop()
+    cutActiveVoices()
+    loadPatternIntoSequence(currentPattern)
+    sequence:goToStep(1)
+    if isRunning then
+        sequence:play(onBarFinish)
+    end
+    drawPerformanceMode()
 end
-
 -- Queue a chain switch for next bar boundary
 local function perfQueueChain(chainIdx)
 	perfPendingChainIdx = chainIdx
@@ -1554,7 +1580,7 @@ local function perfBUp()
 		isRunning = not isRunning
 		if isRunning then
 			updatePOSyncTrack()
-			sequence:play()
+			sequence:play(onBarFinish)
 		else
 			sequence:stop()
 			perfPendingChainIdx = nil
@@ -1613,20 +1639,20 @@ function playdate.update()
 
 
 
-	if isRunning and step == NUM_STEPS and lastStepForChain == NUM_STEPS - 1 then
-		if performanceMode and perfPendingChainIdx ~= nil then
-			currentChainIndex   = perfPendingChainIdx
-			chainList           = chains[currentChainIndex]
-			chainStep           = 1
-			perfPendingChainIdx = nil
-			nextPattern         = chainList[1]
-		elseif chainEnabled and #chainList > 1 then
-			chainStep   = chainStep % #chainList + 1
-			nextPattern = chainList[chainStep]
-		end
-		chainList = chains[currentChainIndex]   -- re-point alias defensively
-		drawGrid()
-	end
+	-- if isRunning and step == NUM_STEPS and lastStepForChain == NUM_STEPS - 1 then
+	-- 	if performanceMode and perfPendingChainIdx ~= nil then
+	-- 		currentChainIndex   = perfPendingChainIdx
+	-- 		chainList           = chains[currentChainIndex]
+	-- 		chainStep           = 1
+	-- 		perfPendingChainIdx = nil
+	-- 		nextPattern         = chainList[1]
+	-- 	elseif chainEnabled and #chainList > 1 then
+	-- 		chainStep   = chainStep % #chainList + 1
+	-- 		nextPattern = chainList[chainStep]
+	-- 	end
+	-- 	chainList = chains[currentChainIndex]   -- re-point alias defensively
+	-- 	drawGrid()
+	-- end
 	
 	--print("Current raw step:",rawStep,", Prev raw step:",prevRawStep)
 	lastStepForChain = step
@@ -1821,7 +1847,7 @@ local function patternModeA()
 			sequence:goToStep(1)   -- ← always reset to bar start
 			if not isRunning then
 				isRunning = true
-				sequence:play()
+				sequence:play(onBarFinish)
 			end
 			bUsedToExitPtn = true    
 			uiMode = "grid"
@@ -2193,7 +2219,7 @@ function playdate.BButtonUp()
 			isRunning = not isRunning
 			if isRunning then
 				updatePOSyncTrack()
-				sequence:play()
+				sequence:play(onBarFinish)
 			else
 				sequence:stop()
 			end
