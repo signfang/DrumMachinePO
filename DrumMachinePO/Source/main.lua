@@ -365,7 +365,8 @@ end
 setBPM(bpmValue)
 -- Loop from internal step 1 to the last internal step of the bar.
 -- NUM_STEPS grid steps × STEP_SCALE = total internal steps per bar.
-sequence:setLoops(1, NUM_STEPS * STEP_SCALE, 1)
+-- "5" is the buffer
+sequence:setLoops(1, NUM_STEPS * STEP_SCALE-5, 1)
 -- sequence:play() is NOT called here; B button starts playback
 
 -- ============================================================
