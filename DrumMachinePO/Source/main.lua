@@ -105,6 +105,7 @@ local function loadSampleBank(name, trackIdx)
     return bank
 end
 
+
 -- Single-sample loader kept for non-drum tracks (click, etc.)
 local function loadSampleForTrack(name)
     for _, ext in ipairs(USER_SAMPLE_EXTS) do
@@ -801,15 +802,12 @@ function drawGrid()
 			local muteHint = tr.muted and " MUTE" or ""
 			gfx.drawText("A:", STATUS_X, 0)
 			gfx.drawText("Mute", STATUS_X, ROW_HEIGHT)
-			gfx.drawText(muteHint, STATUS_X, ROW_HEIGHT*2)
-
-			
+			gfx.drawText(muteHint, STATUS_X, ROW_HEIGHT*2)			
 			--gfx.drawText("Crank:", STATUS_X, ROW_HEIGHT*3)
 			--gfx.drawText("Change", STATUS_X, ROW_HEIGHT*4)
 			--gfx.drawText("Bank", STATUS_X, ROW_HEIGHT*5)
 
 			
-
 
 		elseif bHeld then
 			gfx.drawText("SWING", STATUS_X, 0)
@@ -1334,10 +1332,20 @@ local perfPendingChainIdx = nil
 local perfCrankAccum = 0
 
 -- Effect focus cycling
--- Order: BPM → Swing → (wrap)
-local PERF_FX_NAMES  = { "BPM", "Swing" , "No effects"}
+-- Order: BPM → Swing → Filter → No effects → (wrap)
+local PERF_FX_NAMES  = { "BPM", "Swing", "Filter", "No effects" }
 local perfFxIndex    = 1    -- current focused effect (1-based)
 local perfFxDir      = 1    -- +1 = forward, -1 = reverse cycle
+
+-- One-pole filter for performance mode sweep (-1=LPF, 0=off, +1=HPF)
+local perfFilter = snd.onepolefilter.new()
+perfFilter:setParameter(0)
+perfFilter:setMix(0.9)
+drumChannel:addEffect(perfFilter)
+local perfFilterParam = 0   -- tracked locally since no getter exists
+
+
+
 
 -- A double-tap state
 local perfLastATapMs = 0
@@ -1357,11 +1365,15 @@ local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
 local function perfApplyFxCrank(dir)
 	local fx = PERF_FX_NAMES[perfFxIndex]
 	if fx == "BPM" then
-		bpmValue = clamp(bpmValue + dir * 1, 10, 300)		
+		bpmValue = clamp(bpmValue + dir * 5, 10, 300)
 		setBPM(bpmValue)
-	elseif fx == "Swing" then		
-		swingAmount = clamp(swingAmount + dir * 0.01, 0.0, 0.75)
+	elseif fx == "Swing" then
+		swingAmount = clamp(swingAmount + dir * 0.05, 0.0, 0.75)
 		applySwingToAllTracks()
+	elseif fx == "Filter" then
+		perfFilterParam = clamp(perfFilterParam + dir * 0.05, -1.0, 1.0)
+		--print(perfFilterParam)
+		perfFilter:setParameter(perfFilterParam)
 	end
 end
 
@@ -1455,6 +1467,8 @@ drawPerformanceMode = function()
 		fxVal = tostring(bpmValue)
 	elseif fx == "Swing" then
 		fxVal = math.floor(swingAmount * 100 + 0.5) .. "%"
+	elseif fx == "Filter" then
+		fxVal = string.format("%.2f", perfFilterParam)
 	end
 	local cycleArrow = perfFxDir == 1 and ">" or "<"
 	gfx.drawText(playTag .. "  FX " .. cycleArrow .. "[" .. fx .. "] " .. fxVal, 4, 58)
@@ -2028,13 +2042,13 @@ function playdate.leftButtonDown()
 		elseif patternUIRow == 4 then
 			-- Chain selector: switch to previous chain
 			if currentChainIndex > 1 then
-				switchToChain(currentChainIndex - 1)
-				selectedChainSlot = 1
+				switchToChain(currentChainIndex - 1)				
+				selectedChainSlot = 1				
 			end
 		elseif patternUIRow == 5 then
 			if currentSaveSlot > 1 then currentSaveSlot = currentSaveSlot - 1 end
 		elseif patternUIRow == 3 then
-			if selectedChainSlot > 0 then selectedChainSlot = selectedChainSlot - 1 end			
+			if selectedChainSlot > 0 then selectedChainSlot = selectedChainSlot - 1 end
 		end
 		drawGrid()
 		return
@@ -2057,7 +2071,7 @@ function playdate.rightButtonDown()
 			-- Chain selector: switch to next chain (up to MAX_CHAINS)
 			if currentChainIndex < MAX_CHAINS then
 				switchToChain(currentChainIndex + 1)
-				selectedChainSlot = 1
+				selectedChainSlot = 1								
 			end
 		elseif patternUIRow == 5 then
 			if currentSaveSlot < MAX_SAVE_SLOTS then currentSaveSlot = currentSaveSlot + 1 end
@@ -2364,7 +2378,7 @@ function playdate.cranked(change, acceleratedChange)
 					if #tr.bank > 1 then
 						switchTrackBank(tr, tr.bankIdx + dir)
 						drawGrid()
-					
+						
 					end
 					return
 				end
@@ -2432,6 +2446,9 @@ menu:addMenuItem("Performance", function()
 		uiMode              = "grid"
 		drawPerformanceMode()
 	else
+		-- Reset filter to neutral on exit
+		perfFilterParam = 0
+		perfFilter:setParameter(0)
 		drawGrid()
 	end
 end)
