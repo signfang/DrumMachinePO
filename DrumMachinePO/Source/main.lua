@@ -41,38 +41,94 @@ end
 -- TRACK / INSTRUMENT SETUP
 -- ============================================================
 -- Extensions to probe, in priority order.
-local USER_SAMPLE_EXTS = { ".wav", ".aiff", ".mp3" }
+--local USER_SAMPLE_EXTS = { ".wav", ".aif", ".mp3" ,".pda",".aiff"}
+local USER_SAMPLE_EXTS = {".pda"} -- Only supports pda for now
 local USER_SAMPLE_DIR  = "/Shared/DrumMachinePO/Samples/"
 
--- Returns a playdate.sound.sample, preferring a user file over the bundled asset.
+local MAX_BANK_SAMPLES = 10
+
+-- Scans USER_SAMPLE_DIR for up to MAX_BANK_SAMPLES samples for a given track.
+-- Priority: "KickDrum1.wav" style (name+number) over "Bank1_1.wav" style.
+-- Returns a list of {sample, label} tables, always at least 1 entry.
+local function loadSampleBank(name, trackIdx)
+    local bank = {}
+
+    -- Always load the base bundled asset as bank[1] first
+    local ok, s, err = pcall(playdate.sound.sample.new, name)
+    if ok and s then
+        bank[#bank+1] = { sample=s, label=name }
+    end
+
+    -- Then scan for numbered user overrides e.g. KickDrum1.wav, KickDrum2.wav
+    for n = 1, MAX_BANK_SAMPLES do
+        for _, ext in ipairs(USER_SAMPLE_EXTS) do
+            local path = USER_SAMPLE_DIR .. name .. n .. ext
+			--print("checking:", path, "exists:", playdate.file.exists(path))
+            if playdate.file.exists(path) then				
+                local ok2, s2, err2 = pcall(playdate.sound.sample.new, path)
+				--print("Pcall: ", ok2, s2, err2)
+                if ok2 and s2 then
+                    bank[#bank+1] = { sample=s2, label=name..n }
+					--print(bank[#bank+1][label])
+                    break
+                end
+            end
+        end
+    end
+
+    -- Bank-style scan e.g. Bank1_1.wav
+    if #bank <= 1 then
+        for n = 1, MAX_BANK_SAMPLES do
+            for _, ext in ipairs(USER_SAMPLE_EXTS) do
+                local path = USER_SAMPLE_DIR .. "Bank" .. trackIdx .. "_" .. n .. ext
+				--print("checking:", path, "exists:", playdate.file.exists(path))
+                if playdate.file.exists(path) then
+                    local ok2, s2, err2 = pcall(playdate.sound.sample.new, path)
+					--print("Pcall: ", ok2, s2, err2)
+                    if ok2 and s2 then
+                        bank[#bank+1] = { sample=s2, label="Bank"..trackIdx.."_"..n }
+						--print(bank[#bank+1][label])
+                        break
+                    end
+                end
+            end
+        end
+    end
+
+    -- Last resort: silent placeholder
+    if #bank == 0 then
+        bank[#bank+1] = { sample=playdate.sound.sample.new(), label=name }
+    end
+
+	--print(bank)
+
+    return bank
+end
+
+-- Single-sample loader kept for non-drum tracks (click, etc.)
 local function loadSampleForTrack(name)
-    -- 1. Check for user override in Shared/Samples/
     for _, ext in ipairs(USER_SAMPLE_EXTS) do
         local path = USER_SAMPLE_DIR .. name .. ext
         if playdate.file.exists(path) then
             local ok, sample = pcall(playdate.sound.sample.new, path)
-            if ok and sample then
-                --print("Custom sample loaded: " .. path)
-                return sample
-            end
+            if ok and sample then return sample end
         end
     end
-    -- 2. Fall back to the bundled asset (no extension needed for bundle paths)
     return playdate.sound.sample.new(name)
 end
 
-function newTrack(name)
-    local t   = snd.track.new()
-    local i   = snd.instrument.new()
-    local sample = loadSampleForTrack(name)
-    local s   = snd.synth.new(sample)
+function newTrack(name, trackIdx)
+    local t     = snd.track.new()
+    local i     = snd.instrument.new()
+    local bank  = loadSampleBank(name, trackIdx)
+    local s     = snd.synth.new(bank[1].sample)
     s:setVolume(0.2)
     i:addVoice(s)
     t:setInstrument(i)
-    return { track=t, name=name, synth=s, inst=i,
+    return { track=t, name=name, label=bank[1].label, synth=s, inst=i,
              notes={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
-             volume=1.0,
-             muted=false
+             volume=1.0, muted=false,
+             bank=bank, bankIdx=1
            }
 end
 
@@ -92,6 +148,23 @@ local function applyTrackVolume(tr)
 	end
 end
 
+-- Switch a track to a different bank sample index (Bug 4 safe: new inst/synth).
+local function switchTrackBank(tr, newBankIdx)
+    if #tr.bank <= 1 then return end
+    newBankIdx = math.max(1, math.min(#tr.bank, newBankIdx))
+    if newBankIdx == tr.bankIdx then return end
+    tr.bankIdx = newBankIdx
+    local entry    = tr.bank[newBankIdx]
+    tr.label       = entry.label
+    local newInst  = snd.instrument.new()
+    local newSynth = snd.synth.new(entry.sample)
+    newSynth:setVolume(tr.muted and 0 or 0.2 * tr.volume)
+    newInst:addVoice(newSynth)
+    tr.track:setInstrument(newInst)
+    tr.inst  = newInst
+    tr.synth = newSynth
+end
+
 local TRACK_NAMES = {
 	'KickDrum', 'SnareDrum', 'HHClosed', 'HHOpen',
 	'TomHi', 'TomMid', 'TomLow', 'Clap',
@@ -100,8 +173,8 @@ local TRACK_NAMES = {
 }
 
 tracks = {}
-for _, name in ipairs(TRACK_NAMES) do
-	tracks[#tracks+1] = newTrack(name)
+for ti, name in ipairs(TRACK_NAMES) do
+	tracks[#tracks+1] = newTrack(name, ti)
 end
 
 local LEVEL_INCREMENTS = 9
@@ -250,7 +323,7 @@ local function updateTrack(t, notes)
 			list[#list+1] = {
 				note     = 60,
 				step     = toInternalStep(i) + swingOffset(i),
-				length   = STEP_SCALE,   -- one grid step long
+				length   = STEP_SCALE-3,   -- one grid step long
 				velocity = notes[i] / LEVEL_INCREMENTS
 			}
 		end
@@ -365,7 +438,6 @@ end
 setBPM(bpmValue)
 -- Loop from internal step 1 to the last internal step of the bar.
 -- NUM_STEPS grid steps × STEP_SCALE = total internal steps per bar.
--- "5" is the buffer
 sequence:setLoops(1, NUM_STEPS * STEP_SCALE-5, 1)
 -- sequence:play() is NOT called here; B button starts playback
 
@@ -685,12 +757,16 @@ function drawGrid()
 			-- Track name
 			if nameSelected then
 				gfx.setLineWidth(2)
-				gfx.drawText(tr.name, nameX, (row-1)*ROW_HEIGHT)
+				gfx.drawText(tr.label, nameX, (row-1)*ROW_HEIGHT)
 				gfx.setLineWidth(1)
 				gfx.drawLine(nameX, row*ROW_HEIGHT - 2, TEXT_WIDTH - 10, row*ROW_HEIGHT - 2)
+				if #tr.bank > 1 then
+					gfx.drawText("Bank:", STATUS_X, ROW_HEIGHT*7)
+					gfx.drawText(tr.bankIdx.."/"..#tr.bank, STATUS_X, ROW_HEIGHT*8)
+				end
 			else
 				gfx.setColor(gfx.kColorBlack)
-				gfx.drawText(tr.name, nameX, (row-1)*ROW_HEIGHT)
+				gfx.drawText(tr.label, nameX, (row-1)*ROW_HEIGHT)
 			end
 
 			-- Volume bar: thin vertical bar at right edge of name column (always visible)
@@ -726,6 +802,15 @@ function drawGrid()
 			gfx.drawText("A:", STATUS_X, 0)
 			gfx.drawText("Mute", STATUS_X, ROW_HEIGHT)
 			gfx.drawText(muteHint, STATUS_X, ROW_HEIGHT*2)
+
+			
+			--gfx.drawText("Crank:", STATUS_X, ROW_HEIGHT*3)
+			--gfx.drawText("Change", STATUS_X, ROW_HEIGHT*4)
+			--gfx.drawText("Bank", STATUS_X, ROW_HEIGHT*5)
+
+			
+
+
 		elseif bHeld then
 			gfx.drawText("SWING", STATUS_X, 0)
 			gfx.drawText(":" .. swingPct, STATUS_X, ROW_HEIGHT)
@@ -768,14 +853,15 @@ local function projectToTable()
 	local proj = {
 		version           = 2,
 		bpm               = bpmValue,
-		swing             = swingAmount,   -- raw float; v1 incorrectly divided by STEP_SCALE
+		swing             = swingAmount,
 		chainEnabled      = chainEnabled,
-		chain             = {},            -- legacy v1 compat (mirrors active chain)
-		chains            = {},            -- new: all chains
+		chain             = {},
+		chains            = {},
 		currentChainIndex = currentChainIndex,
 		patterns          = {},
 		trackVolumes      = {},
 		trackMutes        = {},
+		trackBankIndices  = {},
 	}
 	for ci = 1, #chains do
 		proj.chains[ci] = {}
@@ -783,8 +869,9 @@ local function projectToTable()
 	end
 	for i, v in ipairs(chainList) do proj.chain[i] = v end
 	for ti = 1, #tracks do
-		proj.trackVolumes[ti] = tracks[ti].volume
-		proj.trackMutes[ti]   = tracks[ti].muted
+		proj.trackVolumes[ti]     = tracks[ti].volume
+		proj.trackMutes[ti]       = tracks[ti].muted
+		proj.trackBankIndices[ti] = tracks[ti].bankIdx
 	end
 	for p = 1, MAX_PATTERNS do
 		proj.patterns[p] = {}
@@ -833,6 +920,10 @@ local function projectFromTable(proj)
 		tracks[ti].volume = (proj.trackVolumes and proj.trackVolumes[ti]) or 1.0
 		tracks[ti].muted  = (proj.trackMutes   and proj.trackMutes[ti])   or false
 		applyTrackVolume(tracks[ti])
+		local savedBank = proj.trackBankIndices and proj.trackBankIndices[ti]
+		if savedBank and savedBank ~= tracks[ti].bankIdx then
+			switchTrackBank(tracks[ti], savedBank)
+		end
 	end
 	if proj.patterns then
 		for p = 1, MAX_PATTERNS do
@@ -940,11 +1031,13 @@ local function projectToJSON(proj)
         chainArrayParts[#chainArrayParts+1] = '[' .. table.concat(slotParts, ', ') .. ']'
     end
     lines[#lines+1] = '  "chains": [' .. table.concat(chainArrayParts, ', ') .. '],'
-    local volParts, muteParts = {}, {}
-    for _, v in ipairs(proj.trackVolumes) do volParts[#volParts+1]  = tostring(v) end
-    for _, v in ipairs(proj.trackMutes)   do muteParts[#muteParts+1] = (v and 'true' or 'false') end
-    lines[#lines+1] = '  "trackVolumes": [' .. table.concat(volParts,  ', ') .. '],'
-    lines[#lines+1] = '  "trackMutes":   [' .. table.concat(muteParts, ', ') .. '],'
+    local volParts, muteParts, bankParts = {}, {}, {}
+    for _, v in ipairs(proj.trackVolumes)              do volParts[#volParts+1]   = tostring(v) end
+    for _, v in ipairs(proj.trackMutes)                do muteParts[#muteParts+1] = (v and 'true' or 'false') end
+    for _, v in ipairs(proj.trackBankIndices or {})    do bankParts[#bankParts+1] = tostring(v) end
+    lines[#lines+1] = '  "trackVolumes":     [' .. table.concat(volParts,   ', ') .. '],'
+    lines[#lines+1] = '  "trackMutes":       [' .. table.concat(muteParts,  ', ') .. '],'
+    lines[#lines+1] = '  "trackBankIndices": [' .. table.concat(bankParts,  ', ') .. '],'
     lines[#lines+1] = '  "patterns": {'
     for p = 1, MAX_PATTERNS do
         local trackParts = {}
@@ -1074,6 +1167,7 @@ local function projectFromJSON(jsonStr)
         chain             = readNumberArray('chain'),
         trackVolumes      = readNumberArray('trackVolumes'),
         trackMutes        = readBoolArray('trackMutes'),
+        trackBankIndices  = readNumberArray('trackBankIndices'),
         patterns          = {},
         chains            = {},
     }
@@ -1276,6 +1370,7 @@ local function onBarFinish(seq)
     if not isRunning then return end
 
     if performanceMode and perfPendingChainIdx ~= nil then
+        saveCurrentPatternFromTracks()
         currentChainIndex   = perfPendingChainIdx
         chainList           = chains[currentChainIndex]
         chainStep           = 1
@@ -1296,7 +1391,11 @@ local function onBarFinish(seq)
     loadPatternIntoSequence(currentPattern)
     seq:goToStep(1)
     seq:play(onBarFinish)
-    drawGrid()
+    if performanceMode then
+        drawPerformanceMode()
+    else
+        drawGrid()
+    end
 end
 -- Switch performance chain immediately (start from step 1)
 local function perfSwitchChain(chainIdx)
@@ -1310,9 +1409,11 @@ local function perfSwitchChain(chainIdx)
     cutActiveVoices()
     loadPatternIntoSequence(currentPattern)
     sequence:goToStep(1)
-    if isRunning then
-        sequence:play(onBarFinish)
+    if not isRunning then
+        isRunning = true
     end
+    sequence:play(onBarFinish)
+
     drawPerformanceMode()
 end
 -- Queue a chain switch for next bar boundary
@@ -1571,10 +1672,11 @@ local function perfBUp()
 	perfLastBTapMs = now
 	if isDouble then
 		-- Rewind to start of current chain
-		sequence:goToStep(1)
+		sequence:stop()
 		chainStep      = 1
 		currentPattern = chainList[1]
 		loadPatternIntoSequence(currentPattern)
+		sequence:goToStep(1)
 		perfPendingChainIdx = nil
 	else
 		-- Start / stop
@@ -1603,7 +1705,7 @@ local function perfCranked(change, acceleratedChange)
 		end
 	else
 		-- Free crank: control active effect
-		local threshold = 10
+		local threshold = 30
 		if math.abs(perfCrankAccum) >= threshold then
 			local dir2 = perfCrankAccum > 0 and 1 or -1
 			perfCrankAccum = 0
@@ -1625,7 +1727,6 @@ local laststep         = 0
 local lastStepForChain = 0  -- used to detect wrap from step 16 -> step 1
 local prevRawStep = 0
 
-local nextPattern = nil
 function playdate.update()
 	
 	local rawStep = sequence:getCurrentStep()
@@ -1655,30 +1756,7 @@ function playdate.update()
 	-- 	drawGrid()
 	-- end
 	
-	--print("Current raw step:",rawStep,", Prev raw step:",prevRawStep)
 	lastStepForChain = step
-	--print("visit here")
-	--print("Current raw step:",rawStep, "Current step:",step, "Current/Next pattern:", currentPattern, nextPattern, "LastStep/forchain:",laststep, lastStepForChain)
-	if step==1 and nextPattern~=nil then	
-		if not performanceMode then
-			saveCurrentPatternFromTracks()
-		end
-		prevPattern = currentPattern		
-		currentPattern = nextPattern
-		loadPatternIntoSequence(currentPattern)
-		cutActiveVoices()
-		
-		nextPattern=nil
-	end
-
-
-	-- handle edge in the next frame
-	if edgeNextPattern ~= nil then 
-		loadPatternIntoSequence(edgeNextPattern)
-		cutActiveVoices()
-		edgeNextPattern=nil
-	end
-	--print("current Step call:", sequence:getCurrentStep())
 
 	perfCurrentStep = step
 	prevRawStep = rawStep
@@ -1951,11 +2029,12 @@ function playdate.leftButtonDown()
 			-- Chain selector: switch to previous chain
 			if currentChainIndex > 1 then
 				switchToChain(currentChainIndex - 1)
+				selectedChainSlot = 1
 			end
 		elseif patternUIRow == 5 then
 			if currentSaveSlot > 1 then currentSaveSlot = currentSaveSlot - 1 end
 		elseif patternUIRow == 3 then
-			if selectedChainSlot > 0 then selectedChainSlot = selectedChainSlot - 1 end
+			if selectedChainSlot > 0 then selectedChainSlot = selectedChainSlot - 1 end			
 		end
 		drawGrid()
 		return
@@ -1978,6 +2057,7 @@ function playdate.rightButtonDown()
 			-- Chain selector: switch to next chain (up to MAX_CHAINS)
 			if currentChainIndex < MAX_CHAINS then
 				switchToChain(currentChainIndex + 1)
+				selectedChainSlot = 1
 			end
 		elseif patternUIRow == 5 then
 			if currentSaveSlot < MAX_SAVE_SLOTS then currentSaveSlot = currentSaveSlot + 1 end
@@ -2278,6 +2358,16 @@ function playdate.cranked(change, acceleratedChange)
 			if math.abs(crankAccum) >= 10 then
 				local dir = crankAccum > 0 and 1 or -1
 				crankAccum = 0
+				-- Track name selected + multi-sample: switch bank
+				if selectedColumn == 0 then
+					local tr = tracks[selectedRow]
+					if #tr.bank > 1 then
+						switchTrackBank(tr, tr.bankIdx + dir)
+						drawGrid()
+					
+					end
+					return
+				end
 				local target = math.max(1, math.min(MAX_PATTERNS,
 					(crankQueuedPattern or currentPattern) + dir))
 				if not isRunning then
