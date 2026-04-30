@@ -82,17 +82,24 @@ A: Cycle through "effects". Only BPM/Swing for now (To be added)
 B: Start/Stop playing, Double-tap to go all the way back.
 
 
-~~**Using user samples**~~ 
+**Using user samples**
 
-**Currently broken - will be fixed later**
 
 DrumMachinPO looks for the user sample files when starting up. 
 
+**To use user samples, you would need to pre-convert the .wav sample files into .pda files!**
+
+Use included "pda_conv" tool to convert all the .wav files in a current folder (where the executable is located) to .pda files.
+
 Put sample files in Shared/DrumMachinePO/Samples folder to use it instead of the built-in ones.
 
-Sample names should match the ones in the following list (+ extensions. wav/aiff/mp3 are supported).
+Sample names should match the ones in the following list.
 
 'KickDrum', 'SnareDrum', 'HHClosed', 'HHOpen', 'TomHi', 'TomMid', 'TomLow', 'Clap', 'Clav', 'Rimshot', 'Cowbell', 'Maraca', 'CongaHi', 'CongaMid', 'CongaLow'
+
+If suffix numbers are added on the file name, e.g. KickDrum1.pda, KickDrum2.pda... DrumMachinePO will add all of them for each banks. 
+
+Use crank on the track name, then use the crank to select the sample for the bank.
 
 
 
