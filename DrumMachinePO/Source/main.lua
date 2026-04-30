@@ -1334,13 +1334,14 @@ local perfCrankAccum = 0
 -- Effect focus cycling
 -- Order: BPM → Swing → Filter → No effects → (wrap)
 local PERF_FX_NAMES  = { "BPM", "Swing", "Filter", "No effects" }
+--local PERF_FX_NAMES  = { "BPM", "Swing",  "No effects" }
 local perfFxIndex    = 1    -- current focused effect (1-based)
 local perfFxDir      = 1    -- +1 = forward, -1 = reverse cycle
 
 -- One-pole filter for performance mode sweep (-1=LPF, 0=off, +1=HPF)
 local perfFilter = snd.onepolefilter.new()
 perfFilter:setParameter(0)
-perfFilter:setMix(0.9)
+perfFilter:setMix(0)
 drumChannel:addEffect(perfFilter)
 local perfFilterParam = 0   -- tracked locally since no getter exists
 
@@ -1373,6 +1374,7 @@ local function perfApplyFxCrank(dir)
 	elseif fx == "Filter" then
 		perfFilterParam = clamp(perfFilterParam + dir * 0.05, -1.0, 1.0)
 		--print(perfFilterParam)
+		perfFilter:setMix(math.abs(perfFilterParam))  -- 0 at center, 1.0 at extremes
 		perfFilter:setParameter(perfFilterParam)
 	end
 end
