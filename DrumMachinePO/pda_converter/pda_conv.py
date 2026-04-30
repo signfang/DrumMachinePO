@@ -60,8 +60,8 @@ def wav_to_pda(in_wav, out_pda, target_bits=16):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input")
-    ap.add_argument("--output")
+    ap.add_argument("--input",help='Input .wav files. If nothing was given, all the .wav files in the current directory will be used.')
+    ap.add_argument("--output",help='Output .wav files. If nothing was given for input, this will be ignored and output will be')
     ap.add_argument("--bits", type=int, choices=[8, 16], default=16)
     args = ap.parse_args()
     wavfiles = []
@@ -74,8 +74,12 @@ def main():
         wavfiles = [args.input]
         pdafiles = [args.output]
 
+    if not wavfiles:
+        print("No input was given!")
+        return
     
-    print(wavfiles,pdafiles)
+    print("Input wav files: ",wavfiles)
+    print("Output pda files: ",pdafiles)
 
     [wav_to_pda(x, y, args.bits) for (x,y) in zip(wavfiles,pdafiles)]
 
