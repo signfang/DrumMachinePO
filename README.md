@@ -18,7 +18,7 @@ It adds the following features on top of the DrumMachine example:
 3. Pattern chaining (up to 12 different pattern chains).
 4. BPM/Swing adjustment 
 5. Pocket Operator (e.g. PO-33 KO!) sync ability.
-6. User-defined samples (instead of built-in sounds, must be done while connected to PC)
+6. User-defined samples (instead of built-in sounds, must be done while connected to PC and requires pre-compiling)
 
 
 
@@ -82,7 +82,9 @@ A: Cycle through "effects". Only BPM/Swing for now (To be added)
 B: Start/Stop playing, Double-tap to go all the way back.
 
 
-**Using user samples**
+~~**Using user samples**~~ 
+
+**Currently broken - will be fixed later**
 
 DrumMachinPO looks for the user sample files when starting up. 
 
