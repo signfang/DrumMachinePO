@@ -1317,7 +1317,7 @@ local menu = playdate.getSystemMenu()
 -- ============================================================
 
 -- ---- Effect objects for performance mode --------------------
--- Two-pole filter for LPF/HPF sweep (SDK 3.0.3: playdate.sound.twopolefilter)
+-- Two-pole filters for performance mode LPF/HPF sweep
 -- ---- Performance state --------------------------------------
 
 -- D-pad → chain index assignment (1-indexed into chains[])
@@ -1343,11 +1343,22 @@ local perfFxIndex    = 1    -- current focused effect (1-based)
 local perfFxDir      = 1    -- +1 = forward, -1 = reverse cycle
 
 -- One-pole filter for performance mode sweep (-1=LPF, 0=off, +1=HPF)
-local perfFilter = snd.onepolefilter.new()
-perfFilter:setParameter(0)
-perfFilter:setMix(0)
-drumChannel:addEffect(perfFilter)
-local perfFilterParam = 0   -- tracked locally since no getter exists
+-- Two-pole filters for performance mode filter sweep.
+-- Negative perfFilterParam = LPF, positive = HPF.
+-- Two separate filters lets each side be tuned independently.
+local perfFilterLPF = snd.twopolefilter.new("lowpass")
+perfFilterLPF:setFrequency(20000)  -- start wide open
+perfFilterLPF:setResonance(0.5)
+perfFilterLPF:setMix(0)
+drumChannel:addEffect(perfFilterLPF)
+
+local perfFilterHPF = snd.twopolefilter.new("highpass")
+perfFilterHPF:setFrequency(20)     -- start wide open
+perfFilterHPF:setResonance(0.5)
+perfFilterHPF:setMix(0)
+drumChannel:addEffect(perfFilterHPF)
+
+local perfFilterParam = 0   -- -1.0 (full LPF) to +1.0 (full HPF)
 
 
 
@@ -1376,10 +1387,25 @@ local function perfApplyFxCrank(dir)
 		swingAmount = clamp(swingAmount + dir * 0.01, 0.0, 0.75)
 		applySwingToAllTracks()
 	elseif fx == "Filter" then
-		perfFilterParam = clamp(perfFilterParam + dir * 0.05, -0.99, 0.99)
-		--print(perfFilterParam)
-		perfFilter:setMix(math.abs(perfFilterParam))  -- 0 at center, 1.0 at extremes
-		perfFilter:setParameter(perfFilterParam)
+		perfFilterParam = clamp(perfFilterParam + dir * 0.05, -1.0, 1.0)
+		if perfFilterParam < 0 then
+			-- LPF: sweep frequency from 20000 down to ~200 Hz
+			local t = -perfFilterParam  -- 0..1
+			local freq = 20000 * (1 - t) + 200 * t
+			perfFilterLPF:setFrequency(freq)
+			perfFilterLPF:setMix(t)
+			perfFilterHPF:setMix(0)
+		elseif perfFilterParam > 0 then
+			-- HPF: sweep frequency from 20 up to ~8000 Hz
+			local t = perfFilterParam   -- 0..1
+			local freq = 20 * (1 - t) + 8000 * t
+			perfFilterHPF:setFrequency(freq)
+			perfFilterHPF:setMix(t)
+			perfFilterLPF:setMix(0)
+		else
+			perfFilterLPF:setMix(0)
+			perfFilterHPF:setMix(0)
+		end
 	end
 end
 
@@ -1474,7 +1500,15 @@ drawPerformanceMode = function()
 	elseif fx == "Swing" then
 		fxVal = math.floor(swingAmount * 100 + 0.5) .. "%"
 	elseif fx == "Filter" then
-		fxVal = string.format("%.2f", perfFilterParam)
+		filterType = ''
+		if math.abs(perfFilterParam)>0.01 then
+			if perfFilterParam<0 then
+				filterType = 'Low Pass: '
+			else
+				filterType = 'High Pass: '
+			end
+		end
+		fxVal = filterType .. string.format("%.2f", perfFilterParam)
 	end
 	local cycleArrow = perfFxDir == 1 and ">" or "<"
 	gfx.drawText(playTag .. "  FX " .. cycleArrow .. "[" .. fx .. "] " .. fxVal, 4, 58)
@@ -2454,7 +2488,8 @@ menu:addMenuItem("Performance", function()
 	else
 		-- Reset filter to neutral on exit
 		perfFilterParam = 0
-		perfFilter:setParameter(0)
+		perfFilterLPF:setMix(0)
+		perfFilterHPF:setMix(0)
 		drawGrid()
 	end
 end)
