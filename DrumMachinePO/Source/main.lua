@@ -1366,10 +1366,10 @@ local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
 local function perfApplyFxCrank(dir)
 	local fx = PERF_FX_NAMES[perfFxIndex]
 	if fx == "BPM" then
-		bpmValue = clamp(bpmValue + dir * 5, 10, 300)
+		bpmValue = clamp(bpmValue + dir * 1, 10, 300)
 		setBPM(bpmValue)
 	elseif fx == "Swing" then
-		swingAmount = clamp(swingAmount + dir * 0.05, 0.0, 0.75)
+		swingAmount = clamp(swingAmount + dir * 0.01, 0.0, 0.75)
 		applySwingToAllTracks()
 	elseif fx == "Filter" then
 		perfFilterParam = clamp(perfFilterParam + dir * 0.05, -1.0, 1.0)
