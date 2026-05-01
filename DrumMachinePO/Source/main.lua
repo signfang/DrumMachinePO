@@ -149,22 +149,7 @@ local function applyTrackVolume(tr)
 	end
 end
 
--- Switch a track to a different bank sample index (Bug 4 safe: new inst/synth).
-local function switchTrackBank(tr, newBankIdx)
-    if #tr.bank <= 1 then return end
-    newBankIdx = math.max(1, math.min(#tr.bank, newBankIdx))
-    if newBankIdx == tr.bankIdx then return end
-    tr.bankIdx = newBankIdx
-    local entry    = tr.bank[newBankIdx]
-    tr.label       = entry.label
-    local newInst  = snd.instrument.new()
-    local newSynth = snd.synth.new(entry.sample)
-    newSynth:setVolume(tr.muted and 0 or 0.2 * tr.volume)
-    newInst:addVoice(newSynth)
-    tr.track:setInstrument(newInst)
-    tr.inst  = newInst
-    tr.synth = newSynth
-end
+
 
 local TRACK_NAMES = {
 	'KickDrum', 'SnareDrum', 'HHClosed', 'HHOpen',
@@ -259,11 +244,30 @@ sequence:addTrack(poTrack)
 local drumChannel = snd.channel.new()
 local syncChannel = snd.channel.new()
 
+-- Switch a track to a different bank sample index (Bug 4 safe: new inst/synth).
+local function switchTrackBank(tr, newBankIdx)
+    if #tr.bank <= 1 then return end
+    newBankIdx = math.max(1, math.min(#tr.bank, newBankIdx))
+    if newBankIdx == tr.bankIdx then return end
+    tr.bankIdx = newBankIdx
+    local entry   = tr.bank[newBankIdx]
+    tr.label      = entry.label
+    local newInst = snd.instrument.new()
+    local newSynth = snd.synth.new(entry.sample)
+    newSynth:setVolume(tr.muted and 0 or 0.2 * tr.volume)
+    newInst:addVoice(newSynth)
+    tr.track:setInstrument(newInst)
+    drumChannel:addSource(newInst)   -- ← add new instrument to channel
+    tr.inst  = newInst
+    tr.synth = newSynth
+end
+
 -- Assign every drum instrument to drumChannel at startup.
 -- The instrument is the SoundSource; the synth lives inside it.
 -- Once assigned to a custom channel, it no longer plays on the default.
 for _, tr in ipairs(tracks) do
 	drumChannel:addSource(tr.inst)
+	print("Sources added to drumChannel:", #tracks)
 end
 
 -- Assign click instrument to syncChannel at startup.
@@ -1372,7 +1376,7 @@ local function perfApplyFxCrank(dir)
 		swingAmount = clamp(swingAmount + dir * 0.01, 0.0, 0.75)
 		applySwingToAllTracks()
 	elseif fx == "Filter" then
-		perfFilterParam = clamp(perfFilterParam + dir * 0.05, -1.0, 1.0)
+		perfFilterParam = clamp(perfFilterParam + dir * 0.05, -0.99, 0.99)
 		--print(perfFilterParam)
 		perfFilter:setMix(math.abs(perfFilterParam))  -- 0 at center, 1.0 at extremes
 		perfFilter:setParameter(perfFilterParam)
