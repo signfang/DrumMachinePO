@@ -8,17 +8,19 @@ local snd = playdate.sound
 
 -- global effects
 o = snd.overdrive.new()
-snd.addEffect(o)
-
-lfo = playdate.sound.lfo.new(playdate.sound.kWaveTriangle)
-o:setOffsetMod(lfo)
 o:setGain(2.0)
 o:setLimit(0.9)
 
-d = snd.delayline.new(0.25)
-d:setFeedback(0.1)
-d:setMix(0)
-snd.addEffect(d)
+-- Reverb: simulated with a multi-tap long-feedback delay
+r = snd.delayline.new(0.8)
+r:setFeedback(0)
+r:setMix(0)
+local rTap1 = r:addTap(0.03)
+local rTap2 = r:addTap(0.07)
+local rTap3 = r:addTap(0.15)
+rTap1:setVolume(0.6)
+rTap2:setVolume(0.4)
+rTap3:setVolume(0.3)
 
 crankQueuedPattern = nil   -- pattern to play next (set by crank, cleared after one bar)
 crankShadowSlot    = nil   -- which chainStep position was shadowed, so we can resume correctly
@@ -270,6 +272,10 @@ for _, tr in ipairs(tracks) do
 	print("Sources added to drumChannel:", #tracks)
 end
 
+-- Effects must be on drumChannel (drums bypass the default channel)
+drumChannel:addEffect(o)
+drumChannel:addEffect(r)
+
 -- Assign click instrument to syncChannel at startup.
 syncChannel:addSource(poInstrument)
 
@@ -432,9 +438,6 @@ loadPatternIntoSequence(1)
 
 function setBPM(bpm)
 	bpmValue = bpm
-	-- The SDK's setTempo takes steps per second where "step" means one
-	-- grid step (1/16th note). We scale the internal resolution by
-	-- STEP_SCALE, so the tempo must also be multiplied by STEP_SCALE.
 	local stepsPerSecond = 4 * (bpm / 60) * STEP_SCALE
 	sequence:setTempo(stepsPerSecond)
 	updatePOSyncTrack()
@@ -1317,7 +1320,7 @@ local menu = playdate.getSystemMenu()
 -- ============================================================
 
 -- ---- Effect objects for performance mode --------------------
--- Two-pole filters for performance mode LPF/HPF sweep
+-- Two-pole filter for LPF/HPF sweep (SDK 3.0.3: playdate.sound.twopolefilter)
 -- ---- Performance state --------------------------------------
 
 -- D-pad → chain index assignment (1-indexed into chains[])
@@ -1336,29 +1339,34 @@ local perfPendingChainIdx = nil
 local perfCrankAccum = 0
 
 -- Effect focus cycling
--- Order: BPM → Swing → Filter → No effects → (wrap)
-local PERF_FX_NAMES  = { "BPM", "Swing", "Filter", "No effects" }
---local PERF_FX_NAMES  = { "BPM", "Swing",  "No effects" }
+-- Order: BPM → Swing → Filter → Delay → No effects → (wrap)
+local PERF_FX_NAMES  = { "BPM", "Swing", "Filter", "Reverb", "Bitcrusher", "No effects" }
 local perfFxIndex    = 1    -- current focused effect (1-based)
 local perfFxDir      = 1    -- +1 = forward, -1 = reverse cycle
 
--- One-pole filter for performance mode sweep (-1=LPF, 0=off, +1=HPF)
--- Two-pole filters for performance mode filter sweep.
--- Negative perfFilterParam = LPF, positive = HPF.
--- Two separate filters lets each side be tuned independently.
+-- Two-pole filters for performance mode LPF/HPF sweep
 local perfFilterLPF = snd.twopolefilter.new("lowpass")
-perfFilterLPF:setFrequency(20000)  -- start wide open
+perfFilterLPF:setFrequency(20000)
 perfFilterLPF:setResonance(0.5)
 perfFilterLPF:setMix(0)
 drumChannel:addEffect(perfFilterLPF)
 
 local perfFilterHPF = snd.twopolefilter.new("highpass")
-perfFilterHPF:setFrequency(20)     -- start wide open
+perfFilterHPF:setFrequency(20)
 perfFilterHPF:setResonance(0.5)
 perfFilterHPF:setMix(0)
 drumChannel:addEffect(perfFilterHPF)
 
-local perfFilterParam = 0   -- -1.0 (full LPF) to +1.0 (full HPF)
+-- Bitcrusher for lo-fi crunch
+local perfBitcrusher = snd.bitcrusher.new()
+perfBitcrusher:setAmount(0)
+perfBitcrusher:setUndersampling(0)
+perfBitcrusher:setMix(0)
+drumChannel:addEffect(perfBitcrusher)
+
+local perfFilterParam  = 0   -- -1.0 (full LPF) to +1.0 (full HPF)
+local perfReverbParam  = 0.0 -- 0=dry, 1=full reverb
+local perfBitcrushParam = 0.0 -- 0=dry, 1=full crunch
 
 
 
@@ -1389,23 +1397,28 @@ local function perfApplyFxCrank(dir)
 	elseif fx == "Filter" then
 		perfFilterParam = clamp(perfFilterParam + dir * 0.05, -1.0, 1.0)
 		if perfFilterParam < 0 then
-			-- LPF: sweep frequency from 20000 down to ~200 Hz
-			local t = -perfFilterParam  -- 0..1
-			local freq = 20000 * (1 - t) + 200 * t
-			perfFilterLPF:setFrequency(freq)
+			local t = -perfFilterParam
+			perfFilterLPF:setFrequency(20000 * (1 - t) + 200 * t)
 			perfFilterLPF:setMix(t)
 			perfFilterHPF:setMix(0)
 		elseif perfFilterParam > 0 then
-			-- HPF: sweep frequency from 20 up to ~8000 Hz
-			local t = perfFilterParam   -- 0..1
-			local freq = 20 * (1 - t) + 8000 * t
-			perfFilterHPF:setFrequency(freq)
+			local t = perfFilterParam
+			perfFilterHPF:setFrequency(20 * (1 - t) + 8000 * t)
 			perfFilterHPF:setMix(t)
 			perfFilterLPF:setMix(0)
 		else
 			perfFilterLPF:setMix(0)
 			perfFilterHPF:setMix(0)
 		end
+	elseif fx == "Reverb" then
+		perfReverbParam = clamp(perfReverbParam + dir * 0.05, 0.0, 1.0)
+		r:setMix(perfReverbParam * 0.8)
+		r:setFeedback(perfReverbParam * 0.7)
+	elseif fx == "Bitcrusher" then
+		perfBitcrushParam = clamp(perfBitcrushParam + dir * 0.05, 0.0, 1.0)
+		perfBitcrusher:setAmount(perfBitcrushParam * 0.8)
+		perfBitcrusher:setUndersampling(perfBitcrushParam * 0.6)
+		perfBitcrusher:setMix(math.min(perfBitcrushParam * 2, 1.0))
 	end
 end
 
@@ -1500,18 +1513,15 @@ drawPerformanceMode = function()
 	elseif fx == "Swing" then
 		fxVal = math.floor(swingAmount * 100 + 0.5) .. "%"
 	elseif fx == "Filter" then
-		filterType = ''
-		if math.abs(perfFilterParam)>0.01 then
-			if perfFilterParam<0 then
-				filterType = 'Low Pass: '
-			else
-				filterType = 'High Pass: '
-			end
-		end
-		fxVal = filterType .. string.format("%.2f", perfFilterParam)
+		local dir = perfFilterParam < 0 and "Low Pass: " or "High Pass: "
+		
+		fxVal = dir .. " " .. string.format("%.2f", perfFilterParam)
+	elseif fx == "Reverb" then
+		fxVal = math.floor(perfReverbParam * 100 + 0.5) .. "%"
+	elseif fx == "Bitcrusher" then
+		fxVal = math.floor(perfBitcrushParam * 100 + 0.5) .. "%"
 	end
-	local cycleArrow = perfFxDir == 1 and ">" or "<"
-	gfx.drawText(playTag .. "  FX " .. cycleArrow .. "[" .. fx .. "] " .. fxVal, 4, 58)
+	gfx.drawText(playTag .. "  FX >[" .. fx .. "] " .. fxVal, 4, 58)
 
 	-- Chain display: centered, chain name at top, boxes below
 	local BOX_W   = 18
@@ -1707,11 +1717,11 @@ local function perfAUp()
 	local isDouble = (now - perfLastATapMs) < DOUBLE_TAP_MS
 	perfLastATapMs = now
 	if isDouble then
-		-- Reverse cycle direction
-		perfFxDir = -perfFxDir
+		-- Double-tap: go back one effect
+		perfFxIndex = ((perfFxIndex - 2) % #PERF_FX_NAMES) + 1
 	else
-		-- Advance to next effect in current direction
-		perfFxIndex = ((perfFxIndex - 1 + perfFxDir) % #PERF_FX_NAMES) + 1
+		-- Single tap: advance forward
+		perfFxIndex = (perfFxIndex % #PERF_FX_NAMES) + 1
 	end
 	drawPerformanceMode()
 end
@@ -2486,10 +2496,17 @@ menu:addMenuItem("Performance", function()
 		uiMode              = "grid"
 		drawPerformanceMode()
 	else
-		-- Reset filter to neutral on exit
+		-- Reset effects to neutral on exit
 		perfFilterParam = 0
 		perfFilterLPF:setMix(0)
 		perfFilterHPF:setMix(0)
+		perfReverbParam = 0
+		r:setMix(0)
+		r:setFeedback(0)
+		perfBitcrushParam = 0
+		perfBitcrusher:setAmount(0)
+		perfBitcrusher:setUndersampling(0)
+		perfBitcrusher:setMix(0)
 		drawGrid()
 	end
 end)
