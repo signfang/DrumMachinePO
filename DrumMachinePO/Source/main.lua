@@ -559,184 +559,200 @@ local function drawPatternUI()
 	gfx.setColor(gfx.kColorBlack)
 	gfx.setLineWidth(1)
 
-	-- Title
+	local PAGE_SIZE = 8
+	local page = (patternUIRow <= PAGE_SIZE) and 1 or 2
 
-	-- Pattern selection boxes (8 boxes)
-	for p = 1, MAX_PATTERNS do
-		local x = PAT_START_X + (p-1) * (PAT_BOX_W + 4)
-		local y = PAT_BOXES_Y
-		local isCurrent  = (p == currentPattern)
-		local isSelected = (patternUIRow == 1 and p == selectedPatternSlot)
-		local isCopySrc  = (patternCopyMode and p == patternCopySource)
+	-- ============================================================
+	-- PAGE 1  (patternUIRow 1–8)
+	-- ============================================================
+	if page == 1 then
 
+		-- Pattern selection boxes
+		for p = 1, MAX_PATTERNS do
+			local x = PAT_START_X + (p-1) * (PAT_BOX_W + 4)
+			local y = PAT_BOXES_Y
+			local isCurrent  = (p == currentPattern)
+			local isSelected = (patternUIRow == 1 and p == selectedPatternSlot)
+			local isCopySrc  = (patternCopyMode and p == patternCopySource)
+			gfx.setColor(gfx.kColorBlack)
+			if isSelected then gfx.setLineWidth(3) else gfx.setLineWidth(1) end
+			gfx.drawRect(x, y, PAT_BOX_W, PAT_BOX_H)
+			gfx.setLineWidth(1)
+			if isCurrent then gfx.fillRect(x + PAT_BOX_W - 6, y + 2, 4, 4) end
+			if isCopySrc then gfx.drawText("C", x + PAT_BOX_W - 8, y + PAT_BOX_H - 10) end
+			gfx.drawText(tostring(p), x + 4, y + 6)
+		end
+
+		-- Title
+		if patternUIRow == 1 then
+			gfx.drawText("PATTERN " .. selectedPatternSlot .. " BPM:" .. bpmValue .. "  [1/2]", PAT_START_X, PAT_TITLE_Y)
+		else
+			gfx.drawText("PATTERN BPM:" .. bpmValue .. "  [1/2]", PAT_START_X, PAT_TITLE_Y)
+		end
+
+		-- Row 2: Chain toggle
 		gfx.setColor(gfx.kColorBlack)
-		-- Selection = thick border; copy source = dashed inner mark
-		if isSelected then
+		if patternUIRow == 2 then
 			gfx.setLineWidth(3)
-			gfx.drawRect(x, y, PAT_BOX_W, PAT_BOX_H)
+			gfx.drawRect(PAT_START_X - 2, PAT_CHAIN_LABEL_Y - 2, 120, 16)
 			gfx.setLineWidth(1)
+		end
+		if patternUIRow == 3 and selectedChainSlot~=0 and selectedChainSlot < #chainList+1 then
+			gfx.drawText("CHAIN: " .. (chainEnabled and "ON " or "OFF") .. "(selected: " .. chainList[selectedChainSlot] ..")", PAT_START_X, PAT_CHAIN_LABEL_Y)
 		else
-			gfx.setLineWidth(1)
-			gfx.drawRect(x, y, PAT_BOX_W, PAT_BOX_H)
+			gfx.drawText("CHAIN: " .. (chainEnabled and "ON " or "OFF"), PAT_START_X, PAT_CHAIN_LABEL_Y)
 		end
-		-- Current pattern: small filled dot top-right
-		if isCurrent then
-			gfx.fillRect(x + PAT_BOX_W - 6, y + 2, 4, 4)
-		end
-		-- Copy source: small 'C' marker bottom-right
-		if isCopySrc then
-			gfx.drawText("C", x + PAT_BOX_W - 8, y + PAT_BOX_H - 10)
-		end
-		gfx.drawText(tostring(p), x + 4, y + 6)
-	end
 
-	if patternUIRow == 1 then
-		gfx.drawText("PATTERN " .. selectedPatternSlot .. " BPM:" .. bpmValue, PAT_START_X, PAT_TITLE_Y)
-	else
-		gfx.drawText("PATTERN BPM:" .. bpmValue, PAT_START_X, PAT_TITLE_Y)
-	end
-	-- Chain section label
-	gfx.setColor(gfx.kColorBlack)
-	if patternUIRow == 2 then
-		gfx.setLineWidth(3)
-		gfx.drawRect(PAT_START_X - 2, PAT_CHAIN_LABEL_Y - 2, 120, 16)
-		gfx.setLineWidth(1)
-	end
-	gfx.setColor(gfx.kColorBlack)
-
-	if patternUIRow == 3 and selectedChainSlot~=0 and selectedChainSlot < #chainList+1 then
-		gfx.drawText("CHAIN: " .. (chainEnabled and "ON " or "OFF") .. "(selected pattern: " .. chainList[selectedChainSlot] ..")", PAT_START_X, PAT_CHAIN_LABEL_Y)
-	else
-		gfx.drawText("CHAIN: " .. (chainEnabled and "ON " or "OFF"), PAT_START_X, PAT_CHAIN_LABEL_Y)
-	end
-
-
-
-	-- [>] play-all button  (selectedChainSlot == 0)
-	local PLAY_W = 28
-	local isPlaySel = (patternUIRow == 3 and selectedChainSlot == 0)
-	gfx.setColor(gfx.kColorBlack)
-	gfx.setLineWidth(isPlaySel and 3 or 1)
-	gfx.drawRect(PAT_START_X, PAT_CHAIN_ROW_Y, PLAY_W, 20)
-	gfx.setLineWidth(1)
-	gfx.drawText("[>]", PAT_START_X + 3, PAT_CHAIN_ROW_Y + 3)
-
-	-- Chain slots
-	local slotOffX = PAT_START_X + PLAY_W + 4
-	local SLOT_W   = 18
-	local SLOT_GAP = 4
-
-	for ci = 1, #chainList do
-		local x = slotOffX + (ci - 1) * (SLOT_W + SLOT_GAP)
-		local isSelected = (patternUIRow == 3 and ci == selectedChainSlot)
+		-- Row 3: Chain slots
+		local PLAY_W = 28
+		local isPlaySel = (patternUIRow == 3 and selectedChainSlot == 0)
 		gfx.setColor(gfx.kColorBlack)
-		gfx.setLineWidth(isSelected and 3 or 1)
-		gfx.drawRect(x, PAT_CHAIN_ROW_Y, SLOT_W, 20)
+		gfx.setLineWidth(isPlaySel and 3 or 1)
+		gfx.drawRect(PAT_START_X, PAT_CHAIN_ROW_Y, PLAY_W, 20)
 		gfx.setLineWidth(1)
-		gfx.drawText(tostring(chainList[ci]), x + 5, PAT_CHAIN_ROW_Y + 3)
-	end
-
-	-- "+" append slot
-	local addX     = slotOffX + #chainList * (SLOT_W + SLOT_GAP)
-	local isAddSel = (patternUIRow == 3 and selectedChainSlot == #chainList + 1)
-	gfx.setColor(gfx.kColorBlack)
-	gfx.setLineWidth(isAddSel and 3 or 1)
-	gfx.drawRect(addX, PAT_CHAIN_ROW_Y, SLOT_W, 20)
-	gfx.setLineWidth(1)
-	gfx.drawText("+", addX + 7, PAT_CHAIN_ROW_Y + 3)
-	
-
-
-	-- CHAIN SELECTOR row  (patternUIRow == 4)
-	-- Shows "PATTERN CHAIN: x / y" with L/R to switch active chain.
-	-- The chain slot editor (row 3) always edits the currently selected chain.
-	gfx.setColor(gfx.kColorBlack)
-	local chainSelText = "CURRENT PATTERN CHAIN: " .. currentChainIndex .. " / " .. MAX_CHAINS
-	if patternUIRow == 4 then
-		gfx.setLineWidth(3)
-		gfx.drawRect(PAT_START_X - 2, PAT_CHAIN_SEL_Y - 2, 320, 16)
-		gfx.setLineWidth(1)
-	end
-	gfx.drawText(chainSelText, PAT_START_X, PAT_CHAIN_SEL_Y)
-
-	-- SAVE/LOAD slot row  (patternUIRow == 5)
-	gfx.setColor(gfx.kColorBlack)
-	local saveText = "PROJECT SLOT: " .. currentSaveSlot .. " / " .. MAX_SAVE_SLOTS
-	if patternUIRow == 5 then
-		gfx.setLineWidth(3)
-		gfx.drawRect(PAT_START_X - 2, PAT_SAVE_SLOT_ROW_Y - 2, 220, 16)
-		gfx.setLineWidth(1)
-	end
-	gfx.drawText(saveText, PAT_START_X, PAT_SAVE_SLOT_ROW_Y)
-	
-	gfx.setColor(gfx.kColorBlack)
-
-	gfx.drawText("SAVE PROJECT", PAT_START_X, PAT_SAVE_ROW_Y)
-	
-	if patternUIRow == 6 then
-		gfx.setLineWidth(3)
-		gfx.drawRect(PAT_START_X - 2, PAT_SAVE_ROW_Y - 2, 120, 16)
-		gfx.setLineWidth(1)
-	end
-	
-	gfx.drawText("LOAD PROJECT", PAT_START_X, PAT_LOAD_ROW_Y)
-	
-	if patternUIRow == 7 then
-		gfx.setLineWidth(3)
-		gfx.drawRect(PAT_START_X - 2, PAT_LOAD_ROW_Y - 2, 120, 16)
-		gfx.setLineWidth(1)
-	end
-
-	-- PO SYNC row  (patternUIRow == 8)
-	gfx.setColor(gfx.kColorBlack)
-	local syncText = "PO SYNC: " .. (poSyncEnabled and "ON" or "OFF")
-	if patternUIRow == 8 then
-		gfx.setLineWidth(3)
-		gfx.drawRect(PAT_START_X - 2, PAT_PO_SYNC_Y - 2, 150, 16)
-		gfx.setLineWidth(1)
-	end
-	gfx.drawText(syncText, PAT_START_X, PAT_PO_SYNC_Y)
-
-	-- Divider line before help area
-	gfx.drawLine(0, PAT_HELP_SEP_Y, 400, PAT_HELP_SEP_Y)
-
-	-- Help text — changes based on mode
-	gfx.setColor(gfx.kColorBlack)
-	if patternUIRow == 1 then
-		if patternCopyMode then
-			gfx.drawText("COPY MODE: L/R to pick dest", PAT_START_X, PAT_HELP1_Y)
-			gfx.drawText("Release A to paste  |  src: P" .. (patternCopySource or "?"), PAT_START_X, PAT_HELP2_Y)
-		else
-			gfx.drawText("A:load / Hold A 1s:copy / Hold B 1s:clear", PAT_START_X, PAT_HELP1_Y)
-			gfx.drawText("Down:chain / Crank:BPM", PAT_START_X, PAT_HELP2_Y)
+		gfx.drawText("[>]", PAT_START_X + 3, PAT_CHAIN_ROW_Y + 3)
+		local slotOffX = PAT_START_X + PLAY_W + 4
+		local SLOT_W, SLOT_GAP = 18, 4
+		for ci = 1, #chainList do
+			local x = slotOffX + (ci - 1) * (SLOT_W + SLOT_GAP)
+			local isSelected = (patternUIRow == 3 and ci == selectedChainSlot)
+			gfx.setLineWidth(isSelected and 3 or 1)
+			gfx.drawRect(x, PAT_CHAIN_ROW_Y, SLOT_W, 20)
+			gfx.setLineWidth(1)
+			gfx.drawText(tostring(chainList[ci]), x + 5, PAT_CHAIN_ROW_Y + 3)
 		end
-	elseif patternUIRow == 2 then
-		gfx.drawText("A: toggle chain mode", PAT_START_X, PAT_HELP1_Y)
-		gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
-	elseif patternUIRow == 3 then
-		if selectedChainSlot == 0 then
-			gfx.drawText("A: PLAY ALL from start", PAT_START_X, PAT_HELP1_Y)
-		elseif selectedChainSlot == #chainList + 1 then
-			gfx.drawText("A: add current pat to chain", PAT_START_X, PAT_HELP1_Y)
-		else
-			gfx.drawText("A:set slot / Hold B 1s:del slot", PAT_START_X, PAT_HELP1_Y)
+		local addX = slotOffX + #chainList * (SLOT_W + SLOT_GAP)
+		local isAddSel = (patternUIRow == 3 and selectedChainSlot == #chainList + 1)
+		gfx.setLineWidth(isAddSel and 3 or 1)
+		gfx.drawRect(addX, PAT_CHAIN_ROW_Y, SLOT_W, 20)
+		gfx.setLineWidth(1)
+		gfx.drawText("+", addX + 7, PAT_CHAIN_ROW_Y + 3)
+
+		-- Row 4: Chain selector
+		gfx.setColor(gfx.kColorBlack)
+		if patternUIRow == 4 then
+			gfx.setLineWidth(3)
+			gfx.drawRect(PAT_START_X - 2, PAT_CHAIN_SEL_Y - 2, 320, 16)
+			gfx.setLineWidth(1)
 		end
-		gfx.drawText("L/R:move / Crank:change val / B: Back to grid", PAT_START_X, PAT_HELP2_Y)
-	elseif patternUIRow == 4 then
-		gfx.drawText("L/R: switch pattern chain", PAT_START_X, PAT_HELP1_Y)
-		gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
-	elseif patternUIRow == 5 then
-		gfx.drawText("L/R: change slot", PAT_START_X, PAT_HELP1_Y)
-		gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
-	elseif patternUIRow == 6 then
-		gfx.drawText("A: save", PAT_START_X, PAT_HELP1_Y)
-		gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
-	elseif patternUIRow == 7 then
-		gfx.drawText("A: load", PAT_START_X, PAT_HELP1_Y)
-		gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
-	elseif patternUIRow == 8 then
-		gfx.drawText("A: toggle PO sync (SY1 equiv.)", PAT_START_X, PAT_HELP1_Y)
-		gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
+		gfx.drawText("CURRENT PATTERN CHAIN: " .. currentChainIndex .. " / " .. MAX_CHAINS, PAT_START_X, PAT_CHAIN_SEL_Y)
+
+		-- Row 5: Save slot
+		gfx.setColor(gfx.kColorBlack)
+		if patternUIRow == 5 then
+			gfx.setLineWidth(3)
+			gfx.drawRect(PAT_START_X - 2, PAT_SAVE_SLOT_ROW_Y - 2, 220, 16)
+			gfx.setLineWidth(1)
+		end
+		gfx.drawText("PROJECT SLOT: " .. currentSaveSlot .. " / " .. MAX_SAVE_SLOTS, PAT_START_X, PAT_SAVE_SLOT_ROW_Y)
+
+		-- Row 6: Save
+		gfx.setColor(gfx.kColorBlack)
+		if patternUIRow == 6 then
+			gfx.setLineWidth(3)
+			gfx.drawRect(PAT_START_X - 2, PAT_SAVE_ROW_Y - 2, 120, 16)
+			gfx.setLineWidth(1)
+		end
+		gfx.drawText("SAVE PROJECT", PAT_START_X, PAT_SAVE_ROW_Y)
+
+		-- Row 7: Load
+		gfx.setColor(gfx.kColorBlack)
+		if patternUIRow == 7 then
+			gfx.setLineWidth(3)
+			gfx.drawRect(PAT_START_X - 2, PAT_LOAD_ROW_Y - 2, 120, 16)
+			gfx.setLineWidth(1)
+		end
+		gfx.drawText("LOAD PROJECT", PAT_START_X, PAT_LOAD_ROW_Y)
+
+		-- Row 8: PO Sync
+		gfx.setColor(gfx.kColorBlack)
+		if patternUIRow == 8 then
+			gfx.setLineWidth(3)
+			gfx.drawRect(PAT_START_X - 2, PAT_PO_SYNC_Y - 2, 150, 16)
+			gfx.setLineWidth(1)
+		end
+		gfx.drawText("PO SYNC: " .. (poSyncEnabled and "ON" or "OFF"), PAT_START_X, PAT_PO_SYNC_Y)
+
+		-- Help text page 1
+		gfx.drawLine(0, PAT_HELP_SEP_Y, 400, PAT_HELP_SEP_Y)
+		gfx.setColor(gfx.kColorBlack)
+		if patternUIRow == 1 then
+			if patternCopyMode then
+				gfx.drawText("COPY MODE: L/R to pick dest", PAT_START_X, PAT_HELP1_Y)
+				gfx.drawText("Release A to paste  |  src: P" .. (patternCopySource or "?"), PAT_START_X, PAT_HELP2_Y)
+			else
+				gfx.drawText("A:load / Hold A 1s:copy / Hold B 1s:clear", PAT_START_X, PAT_HELP1_Y)
+				gfx.drawText("Down:next / Crank:BPM", PAT_START_X, PAT_HELP2_Y)
+			end
+		elseif patternUIRow == 2 then
+			gfx.drawText("A: toggle chain mode", PAT_START_X, PAT_HELP1_Y)
+			gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
+		elseif patternUIRow == 3 then
+			if selectedChainSlot == 0 then
+				gfx.drawText("A: PLAY ALL from start", PAT_START_X, PAT_HELP1_Y)
+			elseif selectedChainSlot == #chainList + 1 then
+				gfx.drawText("A: add current pat to chain", PAT_START_X, PAT_HELP1_Y)
+			else
+				gfx.drawText("A:set slot / Hold B 1s:del slot", PAT_START_X, PAT_HELP1_Y)
+			end
+			gfx.drawText("L/R:move / Crank:change val / B: back to grid", PAT_START_X, PAT_HELP2_Y)
+		elseif patternUIRow == 4 then
+			gfx.drawText("L/R: switch pattern chain", PAT_START_X, PAT_HELP1_Y)
+			gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
+		elseif patternUIRow == 5 then
+			gfx.drawText("L/R: change slot", PAT_START_X, PAT_HELP1_Y)
+			gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
+		elseif patternUIRow == 6 then
+			gfx.drawText("A: save", PAT_START_X, PAT_HELP1_Y)
+			gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
+		elseif patternUIRow == 7 then
+			gfx.drawText("A: load", PAT_START_X, PAT_HELP1_Y)
+			gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
+		elseif patternUIRow == 8 then
+			gfx.drawText("A: toggle PO sync (SY1 equiv.)", PAT_START_X, PAT_HELP1_Y)
+			gfx.drawText("Down: next page / B: back to grid", PAT_START_X, PAT_HELP2_Y)
+		end
+
+	-- ============================================================
+	-- PAGE 2  (patternUIRow 9–18)  — 10 items, equal spacing
+	-- ============================================================
+	else
+		gfx.drawText("SETTINGS  [2/2]", PAT_START_X, PAT_TITLE_Y)
+
+		-- Equal spacing: 10 items from PAT_CHAIN_LABEL_Y to PAT_HELP_SEP_Y
+		local P2_ROWS  = 10   -- rows 9..18
+		local P2_START = PAT_BOXES_Y                                          -- 48
+		local P2_STEP  = math.floor((PAT_HELP_SEP_Y - P2_START) / P2_ROWS)        -- 14px
+
+		local function drawItem2(rowNum, label)
+			local idx = rowNum - PAGE_SIZE   -- 1..10
+			local y   = P2_START + (idx - 1) * P2_STEP
+			gfx.setColor(gfx.kColorBlack)
+			if patternUIRow == rowNum then
+				gfx.setLineWidth(3)
+				gfx.drawRect(PAT_START_X - 2, y, 300, 18)
+				gfx.setLineWidth(1)
+			end
+			gfx.drawText(label, PAT_START_X, y)
+		end
+
+		-- Placeholder items — replace with real settings as needed
+		drawItem2(9,  "(future setting)")
+		drawItem2(10, "(future setting)")
+		drawItem2(11, "(future setting)")
+		drawItem2(12, "(future setting)")
+		drawItem2(13, "(future setting)")
+		drawItem2(14, "(future setting)")
+		drawItem2(15, "(future setting)")
+		drawItem2(16, "(future setting)")
+		drawItem2(17, "(future setting)")
+		drawItem2(18, "(future setting)")
+
+		-- Help text page 2
+		gfx.drawLine(0, PAT_HELP_SEP_Y, 400, PAT_HELP_SEP_Y)
+		gfx.setColor(gfx.kColorBlack)
+		gfx.drawText("Up: prev page / B: back to grid", PAT_START_X, PAT_HELP1_Y)
+		gfx.drawText("A: select", PAT_START_X, PAT_HELP2_Y)
 	end
 end
 
@@ -2051,6 +2067,10 @@ local function patternModeA()
 		updatePOSyncTrack()
 		drawGrid()
 		return
+	elseif patternUIRow > 8 then
+		-- Page 2: placeholder, no action yet
+		drawGrid()
+		return
 	end
 end
 
@@ -2184,7 +2204,7 @@ function playdate.downButtonDown()
 	if performanceMode then perfDownDown(); return end
 	if dialogMessage ~= nil then return end
 	if uiMode == "pattern" then
-		if patternUIRow < 8 then
+		if patternUIRow < 18 then
 			patternUIRow += 1
 		end
 		drawGrid()
@@ -2239,6 +2259,7 @@ function playdate.AButtonDown()
 		local deferToUp = patternUIRow == 1
 			or patternUIRow == 6
 			or patternUIRow == 7
+			or patternUIRow > 8
 			or (patternUIRow == 2 and selectedChainSlot == 0)  -- [>] deferred
 		if deferToUp then
 			patternAHoldFrames = 0
