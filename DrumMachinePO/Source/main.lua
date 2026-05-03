@@ -81,22 +81,21 @@ local function loadSampleBank(name, trackIdx)
 
     -- Bank-style scan: "Bank{trackIdx}_{name}.pda"
     -- e.g. Bank1_Crash.pda → added to track 1 with label "Crash"
-    if #bank <= 1 then
-        local files = playdate.file.listFiles(USER_SAMPLE_DIR) or {}
-        for _, filename in ipairs(files) do
-            for _, ext in ipairs(USER_SAMPLE_EXTS) do
-                local labelName = filename:match("^Bank" .. trackIdx .. "_(.+)%" .. ext .. "$")
-                if labelName then
-                    local path = USER_SAMPLE_DIR .. filename
-                    local ok2, s2 = pcall(playdate.sound.sample.new, path)
-                    if ok2 and s2 then
-                        bank[#bank+1] = { sample=s2, label=labelName }
-                    end
-                    break
-                end
-            end
-        end
-    end
+
+	local files = playdate.file.listFiles(USER_SAMPLE_DIR) or {}
+	for _, filename in ipairs(files) do
+		for _, ext in ipairs(USER_SAMPLE_EXTS) do
+			local labelName = filename:match("^Bank" .. trackIdx .. "_(.+)%" .. ext .. "$")
+			if labelName then
+				local path = USER_SAMPLE_DIR .. filename
+				local ok2, s2 = pcall(playdate.sound.sample.new, path)
+				if ok2 and s2 then
+					bank[#bank+1] = { sample=s2, label=labelName }
+				end
+				break
+			end
+		end
+	end
 
     -- Last resort: silent placeholder
     if #bank == 0 then

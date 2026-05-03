@@ -1,7 +1,8 @@
-import wave
-import struct
 import argparse
 from pathlib import Path
+import struct
+import soundfile as sf
+import numpy as np
 
 def write_uint24_le(f, n):
     f.write(bytes((n & 0xFF, (n >> 8) & 0xFF, (n >> 16) & 0xFF)))
@@ -10,38 +11,18 @@ def pcm16_to_pcm8_signed(sample):
     x = (sample >> 8) + 128
     return max(0, min(255, x))
 
-def wav_to_pda(in_wav, out_pda, target_bits=16):
-    if not isinstance(in_wav,Path):
-        in_wav = Path(in_wav)
-    if not isinstance(out_pda,Path):
-        out_pda = Path(out_pda)
+def read_audio(path):
+    # soundfile handles WAV/AIFF formats natively
+    data, samplerate = sf.read(path, dtype='int16', always_2d=True)
+    nchannels = data.shape[1]
+    samples16 = data.flatten().tolist()
+    return nchannels, int(samplerate), samples16
 
-    with wave.open(str(in_wav), "rb") as wf:
-        nchannels = wf.getnchannels()
-        sampwidth = wf.getsampwidth()
-        samplerate = wf.getframerate()
-        nframes = wf.getnframes()
-        raw = wf.readframes(nframes)
+def audio_to_pda(in_file, out_pda, target_bits=16):
+    in_file = Path(in_file)
+    out_pda = Path(out_pda)
 
-    if nchannels not in (1, 2):
-        raise ValueError("Only mono or stereo WAV files are supported")
-
-    if sampwidth == 1:
-        s8 = raw
-        samples16 = [(b - 128) << 8 for b in s8]
-    elif sampwidth == 2:
-        samples16 = list(struct.unpack("<{}h".format(len(raw) // 2), raw))
-    elif sampwidth == 3:
-        samples16 = []
-        for i in range(0, len(raw), 3):
-            b = raw[i:i+3]
-            v = int.from_bytes(b + (b'\xff' if b[2] & 0x80 else b'\x00'), "little", signed=True)
-            samples16.append(v >> 8)
-    elif sampwidth == 4:
-        ints = struct.unpack("<{}i".format(len(raw) // 4), raw)
-        samples16 = [max(-32768, min(32767, v >> 16)) for v in ints]
-    else:
-        raise ValueError("Unsupported WAV bit depth")
+    nchannels, samplerate, samples16 = read_audio(in_file)
 
     if target_bits == 8:
         fmt = 0 if nchannels == 1 else 1
@@ -51,7 +32,7 @@ def wav_to_pda(in_wav, out_pda, target_bits=16):
         payload = struct.pack("<{}h".format(len(samples16)), *samples16)
     else:
         raise ValueError("target_bits must be 8 or 16")
-    
+
     with open(out_pda, "wb") as f:
         f.write(b"Playdate AUD")
         write_uint24_le(f, samplerate)
@@ -59,29 +40,28 @@ def wav_to_pda(in_wav, out_pda, target_bits=16):
         f.write(payload)
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--input",help='Input .wav files. If nothing was given, all the .wav files in the current directory will be used.')
-    ap.add_argument("--output",help='Output .wav files. If nothing was given for input, this will be ignored and output will be')
+    ap = argparse.ArgumentParser(description="Convert audio to Playdate .pda")
+    ap.add_argument("--input", help="Input audio file")
+    ap.add_argument("--output", help="Output .pda file")
     ap.add_argument("--bits", type=int, choices=[8, 16], default=16)
-    args = ap.parse_args()
-    wavfiles = []
-    pdafiles = []
-    if args.input is None:
-        # if input is None, ignore the output arguments
-        wavfiles = [Path(x) for x in Path.cwd().glob('*.wav')]
-        pdafiles = [x.with_suffix(".pda") for x in wavfiles]
-    else:
-        wavfiles = [args.input]
-        pdafiles = [args.output]
-
-    if not wavfiles:
-        print("No input was given!")
-        return
     
-    print("Input wav files: ",wavfiles)
-    print("Output pda files: ",pdafiles)
+    args = ap.parse_args()
 
-    [wav_to_pda(x, y, args.bits) for (x,y) in zip(wavfiles,pdafiles)]
+    if args.input is None:
+        inputs = []
+        for ext in ("*.wav", "*.aif", "*.aiff"):
+            inputs.extend(Path.cwd().glob(ext))
+        if not inputs:
+            print("No audio files found in current directory.")
+            return
+        for inp in inputs:
+            print(f"Converting {inp}...")
+            audio_to_pda(inp, inp.with_suffix(".pda"), args.bits)
+    else:
+        if args.output is None:
+            raise ValueError("You must provide --output when using --input")
+        audio_to_pda(args.input, args.output, args.bits)
+        print(f"Converted {args.input} to {args.output}")
 
 if __name__ == "__main__":
     main()
