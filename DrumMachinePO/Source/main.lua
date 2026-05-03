@@ -26,6 +26,7 @@ crankQueuedPattern = nil   -- pattern to play next (set by crank, cleared after 
 crankShadowSlot    = nil   -- which chainStep position was shadowed, so we can resume correctly
 
 performanceMode = false   -- global; checked by every input handler
+perfAutoplay    = true    -- if true, d-pad queuing immediately switches; if false, always queues until bar end
 
 -- perfStatus: kept for held-button tracking used by perf handlers
 local perfStatus = {
@@ -78,20 +79,20 @@ local function loadSampleBank(name, trackIdx)
         end
     end
 
-    -- Bank-style scan e.g. Bank1_1.wav
+    -- Bank-style scan: "Bank{trackIdx}_{name}.pda"
+    -- e.g. Bank1_Crash.pda → added to track 1 with label "Crash"
     if #bank <= 1 then
-        for n = 1, MAX_BANK_SAMPLES do
+        local files = playdate.file.listFiles(USER_SAMPLE_DIR) or {}
+        for _, filename in ipairs(files) do
             for _, ext in ipairs(USER_SAMPLE_EXTS) do
-                local path = USER_SAMPLE_DIR .. "Bank" .. trackIdx .. "_" .. n .. ext
-				--print("checking:", path, "exists:", playdate.file.exists(path))
-                if playdate.file.exists(path) then
-                    local ok2, s2, err2 = pcall(playdate.sound.sample.new, path)
-					--print("Pcall: ", ok2, s2, err2)
+                local labelName = filename:match("^Bank" .. trackIdx .. "_(.+)%" .. ext .. "$")
+                if labelName then
+                    local path = USER_SAMPLE_DIR .. filename
+                    local ok2, s2 = pcall(playdate.sound.sample.new, path)
                     if ok2 and s2 then
-                        bank[#bank+1] = { sample=s2, label="Bank"..trackIdx.."_"..n }
-						--print(bank[#bank+1][label])
-                        break
+                        bank[#bank+1] = { sample=s2, label=labelName }
                     end
+                    break
                 end
             end
         end
@@ -270,7 +271,6 @@ end
 -- Once assigned to a custom channel, it no longer plays on the default.
 for _, tr in ipairs(tracks) do
 	drumChannel:addSource(tr.inst)
-	print("Sources added to drumChannel:", #tracks)
 end
 
 -- Effects must be on drumChannel (drums bypass the default channel)
@@ -585,9 +585,9 @@ local function drawPatternUI()
 
 		-- Title
 		if patternUIRow == 1 then
-			gfx.drawText("PATTERN " .. selectedPatternSlot .. " BPM:" .. bpmValue .. "  [1/2]", PAT_START_X, PAT_TITLE_Y)
+			gfx.drawText("PATTERN " .. selectedPatternSlot .. " BPM:" .. bpmValue, PAT_START_X, PAT_TITLE_Y)
 		else
-			gfx.drawText("PATTERN BPM:" .. bpmValue .. "  [1/2]", PAT_START_X, PAT_TITLE_Y)
+			gfx.drawText("PATTERN BPM:" .. bpmValue, PAT_START_X, PAT_TITLE_Y)
 		end
 
 		-- Row 2: Chain toggle
@@ -717,10 +717,10 @@ local function drawPatternUI()
 	-- PAGE 2  (patternUIRow 9–18)  — 10 items, equal spacing
 	-- ============================================================
 	else
-		gfx.drawText("SETTINGS  [2/2]", PAT_START_X, PAT_TITLE_Y)
+		gfx.drawText("SETTINGS", PAT_START_X, PAT_TITLE_Y)
 
 		-- Equal spacing: 10 items from PAT_CHAIN_LABEL_Y to PAT_HELP_SEP_Y
-		local P2_ROWS  = 10   -- rows 9..18
+		local P2_ROWS  = 9   -- rows 9..18
 		local P2_START = PAT_BOXES_Y                                          -- 48
 		local P2_STEP  = math.floor((PAT_HELP_SEP_Y - P2_START) / P2_ROWS)        -- 14px
 
@@ -737,8 +737,8 @@ local function drawPatternUI()
 		end
 
 		-- Placeholder items — replace with real settings as needed
-		drawItem2(9,  "(future setting)")
-		drawItem2(10, "(future setting)")
+		drawItem2(9,  "PERF AUTOPLAY: " .. (perfAutoplay and "ON" or "OFF"))
+		drawItem2(10, "RESTORE DEFAULTS")
 		drawItem2(11, "(future setting)")
 		drawItem2(12, "(future setting)")
 		drawItem2(13, "(future setting)")
@@ -746,13 +746,20 @@ local function drawPatternUI()
 		drawItem2(15, "(future setting)")
 		drawItem2(16, "(future setting)")
 		drawItem2(17, "(future setting)")
-		drawItem2(18, "(future setting)")
 
 		-- Help text page 2
 		gfx.drawLine(0, PAT_HELP_SEP_Y, 400, PAT_HELP_SEP_Y)
 		gfx.setColor(gfx.kColorBlack)
-		gfx.drawText("Up: prev page / B: back to grid", PAT_START_X, PAT_HELP1_Y)
-		gfx.drawText("A: select", PAT_START_X, PAT_HELP2_Y)
+		if patternUIRow == 9 then
+			gfx.drawText("A: toggle  (ON=immediate, OFF=queue)", PAT_START_X, PAT_HELP1_Y)
+			gfx.drawText("Up: prev page / B: back to grid", PAT_START_X, PAT_HELP2_Y)
+		elseif patternUIRow == 10 then
+			gfx.drawText("A: restore all to defaults", PAT_START_X, PAT_HELP1_Y)
+			gfx.drawText("Up: prev page / B: back to grid", PAT_START_X, PAT_HELP2_Y)
+		else
+			gfx.drawText("Up: prev page / B: back to grid", PAT_START_X, PAT_HELP1_Y)
+			gfx.drawText("", PAT_START_X, PAT_HELP2_Y)
+		end
 	end
 end
 
@@ -1490,10 +1497,15 @@ local function perfSwitchChain(chainIdx)
 
     drawPerformanceMode()
 end
--- Queue a chain switch for next bar boundary
+-- Queue a chain switch for next bar boundary.
+-- If perfAutoplay is true, treat as immediate switch instead.
 local function perfQueueChain(chainIdx)
-	perfPendingChainIdx = chainIdx
-	drawPerformanceMode()
+	if perfAutoplay then
+		perfSwitchChain(chainIdx)
+	else
+		perfPendingChainIdx = chainIdx
+		drawPerformanceMode()
+	end
 end
 
 -- ---- Draw ---------------------------------------------------
@@ -2068,8 +2080,11 @@ local function patternModeA()
 		drawGrid()
 		return
 	elseif patternUIRow > 8 then
-		-- Page 2: placeholder, no action yet
-		drawGrid()
+		if patternUIRow == 9 then
+			perfAutoplay = not perfAutoplay
+			drawGrid()
+		end
+		-- row 10 (restore defaults) is handled in AButtonUp via dialog
 		return
 	end
 end
@@ -2204,7 +2219,7 @@ function playdate.downButtonDown()
 	if performanceMode then perfDownDown(); return end
 	if dialogMessage ~= nil then return end
 	if uiMode == "pattern" then
-		if patternUIRow < 18 then
+		if patternUIRow < 17 then
 			patternUIRow += 1
 		end
 		drawGrid()
@@ -2259,8 +2274,9 @@ function playdate.AButtonDown()
 		local deferToUp = patternUIRow == 1
 			or patternUIRow == 6
 			or patternUIRow == 7
-			or patternUIRow > 8
-			or (patternUIRow == 2 and selectedChainSlot == 0)  -- [>] deferred
+			or patternUIRow == 10
+			or patternUIRow > 10
+			or (patternUIRow == 3 and selectedChainSlot == 0)
 		if deferToUp then
 			patternAHoldFrames = 0
 		else
@@ -2312,7 +2328,50 @@ function playdate.AButtonUp()
 		elseif patternUIRow == 6 or patternUIRow == 7 then
 			patternModeA()
 		elseif patternUIRow == 3 and selectedChainSlot == 0 then
-			patternModeA()   
+			patternModeA()
+		elseif patternUIRow == 10 then
+			showDialog("Restore all defaults? This clears all patterns.", function(confirmed)
+				if confirmed then
+					for p = 1, MAX_PATTERNS do
+						for ti = 1, #tracks do
+							for s = 1, NUM_STEPS do patterns[p][ti].notes[s] = 0 end
+						end
+					end
+					patterns[1][1].notes = { 9,0,0,0, 0,0,0,0, 0,0,6,0, 0,0,0,0 }
+					patterns[1][2].notes = { 0,0,0,0, 9,0,0,0, 0,7,0,0, 9,0,0,0 }
+					patterns[1][3].notes = { 8,0,5,0, 6,0,5,0, 8,0,5,0, 6,0,5,0 }
+					patterns[1][9].notes = { 0,0,0,3, 0,2,0,0, 0,0,0,3, 0,0,0,0 }
+					bpmValue     = 120
+					swingAmount  = 0.0
+					chainEnabled = false
+					for ci = 1, MAX_CHAINS do chains[ci] = { 1 } end
+					currentChainIndex = 1
+					chainList    = chains[1]
+					chainStep    = 1
+					perfAutoplay = true
+					perfFilterParam = 0
+					perfFilterLPF:setMix(0)
+					perfFilterHPF:setMix(0)
+					perfReverbParam = 0
+					r:setMix(0)
+					r:setFeedback(0)
+					perfBitcrushParam = 0
+					perfBitcrusher:setAmount(0)
+					perfBitcrusher:setUndersampling(0)
+					perfBitcrusher:setMix(0)
+					for _, tr in ipairs(tracks) do
+						tr.volume = 1.0
+						tr.muted  = false
+						applyTrackVolume(tr)
+					end
+					setBPM(120)
+					currentPattern = 1
+					loadPatternIntoSequence(1)
+					showToast("Defaults restored")
+				end
+				drawGrid()
+			end)
+			drawGrid()
 		end
 		return
 	end
