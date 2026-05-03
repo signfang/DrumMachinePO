@@ -140,6 +140,7 @@ local btnHoldAdj = false
 local bUsedToExitPtn = false
 local lastBTapTime = 0
 local DOUBLE_TAP_MS = 300
+local DOUBLE_TAP_A_MS = 200
 
 -- Apply a track's volume/muted state to its synth.
 -- Base synth volume is 0.2; per-track volume scales on top.
@@ -1340,7 +1341,7 @@ local perfCrankAccum = 0
 
 -- Effect focus cycling
 -- Order: BPM → Swing → Filter → Delay → No effects → (wrap)
-local PERF_FX_NAMES  = { "BPM", "Swing", "Filter", "Reverb", "Bitcrusher", "No effects" }
+local PERF_FX_NAMES  = { "BPM", "Swing", "Filter", "Delay", "Bitcrusher", "No effects" }
 local perfFxIndex    = 1    -- current focused effect (1-based)
 local perfFxDir      = 1    -- +1 = forward, -1 = reverse cycle
 
@@ -1410,7 +1411,7 @@ local function perfApplyFxCrank(dir)
 			perfFilterLPF:setMix(0)
 			perfFilterHPF:setMix(0)
 		end
-	elseif fx == "Reverb" then
+	elseif fx == "Delay" then
 		perfReverbParam = clamp(perfReverbParam + dir * 0.05, 0.0, 1.0)
 		r:setMix(perfReverbParam * 0.8)
 		r:setFeedback(perfReverbParam * 0.7)
@@ -1516,7 +1517,7 @@ drawPerformanceMode = function()
 		local dir = perfFilterParam < 0 and "Low Pass: " or "High Pass: "
 		
 		fxVal = dir .. " " .. string.format("%.2f", perfFilterParam)
-	elseif fx == "Reverb" then
+	elseif fx == "Delay" then
 		fxVal = math.floor(perfReverbParam * 100 + 0.5) .. "%"
 	elseif fx == "Bitcrusher" then
 		fxVal = math.floor(perfBitcrushParam * 100 + 0.5) .. "%"
@@ -1707,23 +1708,27 @@ local function perfRightUp()
 	drawPerformanceMode()
 end
 
+local perfAPendingAdvance = false  -- a single tap is waiting to fire
+local perfALastDownMs = 0
 
 local function perfADown()
-	perfStatus.held.a = true
+    perfStatus.held.a = true
+    perfALastDownMs = playdate.getCurrentTimeMilliseconds()
 end
+
 local function perfAUp()
-	perfStatus.held.a = false
-	local now = playdate.getCurrentTimeMilliseconds()
-	local isDouble = (now - perfLastATapMs) < DOUBLE_TAP_MS
-	perfLastATapMs = now
-	if isDouble then
-		-- Double-tap: go back one effect
-		perfFxIndex = ((perfFxIndex - 2) % #PERF_FX_NAMES) + 1
-	else
-		-- Single tap: advance forward
-		perfFxIndex = (perfFxIndex % #PERF_FX_NAMES) + 1
-	end
-	drawPerformanceMode()
+    perfStatus.held.a = false
+    local now = playdate.getCurrentTimeMilliseconds()
+    if (now - perfLastATapMs) < DOUBLE_TAP_A_MS then
+        -- Second tap released — cancel pending single tap, go back instead
+        perfAPendingAdvance = false
+        perfFxIndex = ((perfFxIndex - 2) % #PERF_FX_NAMES) + 1
+        drawPerformanceMode()
+    else
+        -- First tap released — don't act yet, wait to see if second tap comes
+        perfAPendingAdvance = true
+    end
+    perfLastATapMs = now
 end
 
 local function perfBDown()
@@ -1802,7 +1807,11 @@ function playdate.update()
 	-- Chain advancement: when step wraps from NUM_STEPS back to 1
 	
 	
-
+	if perfAPendingAdvance and playdate.getCurrentTimeMilliseconds() - perfLastATapMs >= DOUBLE_TAP_A_MS then
+		perfAPendingAdvance = false
+		perfFxIndex = (perfFxIndex % #PERF_FX_NAMES) + 1
+		drawPerformanceMode()
+	end
 
 
 	-- if isRunning and step == NUM_STEPS and lastStepForChain == NUM_STEPS - 1 then
