@@ -1488,24 +1488,25 @@ local function perfSwitchChain(chainIdx)
     currentPattern      = chainList[1]
     sequence:stop()
     cutActiveVoices()
-    loadPatternIntoSequence(currentPattern)
+    loadPatternIntoSequence(currentPattern)	
     sequence:goToStep(1)
-    if not isRunning then
-        isRunning = true
-    end
-    sequence:play(onBarFinish)
+	if perfAutoplay then
+		if not isRunning then
+			isRunning = true		
+		end
+		sequence:play(onBarFinish)
+	end
+	
 
     drawPerformanceMode()
 end
 -- Queue a chain switch for next bar boundary.
 -- If perfAutoplay is true, treat as immediate switch instead.
 local function perfQueueChain(chainIdx)
-	if perfAutoplay then
-		perfSwitchChain(chainIdx)
-	else
-		perfPendingChainIdx = chainIdx
-		drawPerformanceMode()
-	end
+
+	perfPendingChainIdx = chainIdx
+	drawPerformanceMode()
+
 end
 
 -- ---- Draw ---------------------------------------------------
