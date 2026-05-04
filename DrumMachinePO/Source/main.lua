@@ -27,6 +27,7 @@ crankShadowSlot    = nil   -- which chainStep position was shadowed, so we can r
 
 performanceMode = false   -- global; checked by every input handler
 perfAutoplay    = true    -- if true, d-pad queuing immediately switches; if false, always queues until bar end
+perfKeepFx      = false   -- if true, performance effects persist after leaving performance mode
 
 -- perfStatus: kept for held-button tracking used by perf handlers
 local perfStatus = {
@@ -560,6 +561,7 @@ local function drawPatternUI()
 
 	local PAGE_SIZE = 8
 	local page = (patternUIRow <= PAGE_SIZE) and 1 or 2
+	local PAGE_LABEL_X = 320
 
 	-- ============================================================
 	-- PAGE 1  (patternUIRow 1–8)
@@ -672,6 +674,10 @@ local function drawPatternUI()
 		end
 		gfx.drawText("PO SYNC: " .. (poSyncEnabled and "ON" or "OFF"), PAT_START_X, PAT_PO_SYNC_Y)
 
+		
+		gfx.drawText("Page 1/2", PAGE_LABEL_X, PAT_PO_SYNC_Y)
+
+
 		-- Help text page 1
 		gfx.drawLine(0, PAT_HELP_SEP_Y, 400, PAT_HELP_SEP_Y)
 		gfx.setColor(gfx.kColorBlack)
@@ -717,6 +723,7 @@ local function drawPatternUI()
 	-- ============================================================
 	else
 		gfx.drawText("SETTINGS", PAT_START_X, PAT_TITLE_Y)
+		gfx.drawText("Page 2/2", PAGE_LABEL_X, PAT_PO_SYNC_Y)
 
 		-- Equal spacing: 10 items from PAT_CHAIN_LABEL_Y to PAT_HELP_SEP_Y
 		local P2_ROWS  = 9   -- rows 9..18
@@ -738,13 +745,15 @@ local function drawPatternUI()
 		-- Placeholder items — replace with real settings as needed
 		drawItem2(9,  "PERF AUTOPLAY: " .. (perfAutoplay and "ON" or "OFF"))
 		drawItem2(10, "RESTORE DEFAULTS")
-		drawItem2(11, "(future setting)")
+		drawItem2(11, "KEEP PERF FX: " .. (perfKeepFx and "ON" or "OFF"))
+		--[[
 		drawItem2(12, "(future setting)")
 		drawItem2(13, "(future setting)")
 		drawItem2(14, "(future setting)")
 		drawItem2(15, "(future setting)")
 		drawItem2(16, "(future setting)")
 		drawItem2(17, "(future setting)")
+		]]--
 
 		-- Help text page 2
 		gfx.drawLine(0, PAT_HELP_SEP_Y, 400, PAT_HELP_SEP_Y)
@@ -2083,6 +2092,9 @@ local function patternModeA()
 		if patternUIRow == 9 then
 			perfAutoplay = not perfAutoplay
 			drawGrid()
+		elseif patternUIRow == 11 then
+			perfKeepFx = not perfKeepFx
+			drawGrid()
 		end
 		-- row 10 (restore defaults) is handled in AButtonUp via dialog
 		return
@@ -2219,7 +2231,8 @@ function playdate.downButtonDown()
 	if performanceMode then perfDownDown(); return end
 	if dialogMessage ~= nil then return end
 	if uiMode == "pattern" then
-		if patternUIRow < 17 then
+		--if patternUIRow < 17 then
+		if patternUIRow < 11 then
 			patternUIRow += 1
 		end
 		drawGrid()
@@ -2275,7 +2288,6 @@ function playdate.AButtonDown()
 			or patternUIRow == 6
 			or patternUIRow == 7
 			or patternUIRow == 10
-			or patternUIRow > 10
 			or (patternUIRow == 3 and selectedChainSlot == 0)
 		if deferToUp then
 			patternAHoldFrames = 0
@@ -2349,6 +2361,7 @@ function playdate.AButtonUp()
 					chainList    = chains[1]
 					chainStep    = 1
 					perfAutoplay = true
+					perfKeepFx   = false
 					perfFilterParam = 0
 					perfFilterLPF:setMix(0)
 					perfFilterHPF:setMix(0)
@@ -2585,17 +2598,19 @@ menu:addMenuItem("Performance", function()
 		uiMode              = "grid"
 		drawPerformanceMode()
 	else
-		-- Reset effects to neutral on exit
-		perfFilterParam = 0
-		perfFilterLPF:setMix(0)
-		perfFilterHPF:setMix(0)
-		perfReverbParam = 0
-		r:setMix(0)
-		r:setFeedback(0)
-		perfBitcrushParam = 0
-		perfBitcrusher:setAmount(0)
-		perfBitcrusher:setUndersampling(0)
-		perfBitcrusher:setMix(0)
+		-- Reset effects to neutral on exit (unless user chose to keep them)
+		if not perfKeepFx then
+			perfFilterParam = 0
+			perfFilterLPF:setMix(0)
+			perfFilterHPF:setMix(0)
+			perfReverbParam = 0
+			r:setMix(0)
+			r:setFeedback(0)
+			perfBitcrushParam = 0
+			perfBitcrusher:setAmount(0)
+			perfBitcrusher:setUndersampling(0)
+			perfBitcrusher:setMix(0)
+		end
 		drawGrid()
 	end
 end)
