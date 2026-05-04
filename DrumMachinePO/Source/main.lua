@@ -480,7 +480,113 @@ local crankAccum = 0    -- shared accumulator for all crank modes
 
 -- Pattern UI state
 selectedPatternSlot = 1   -- 1..MAX_PATTERNS
-patternUIRow        = 1   -- 1=pattern row, 3=chain row, 4=save/load, 4=PO sync
+patternUIRow        = 1   -- current selected row index (1-based into PATTERN_MENU)
+
+-- ============================================================
+-- PATTERN UI MENU TABLE
+--
+-- Each entry defines one navigable row in the PTNs/settings UI.
+-- Fields:
+--   id      : unique string identifier — all logic uses this, never the row number
+--   page    : 1 or 2 (which page it appears on)
+--   defer   : true = A action fires on AButtonUp (needed when action opens a dialog)
+--   label() : function returning the display string for page 2 items (nil for page 1)
+--   action(): function called when A is pressed (or released if defer=true)
+--   help1() : function returning first help line string
+--   help2() : function returning second help line string
+-- ============================================================
+
+-- Forward declarations for action functions (defined after their dependencies exist)
+local pmAction_patterns, pmAction_chain, pmAction_chainSlots, pmAction_chainSel
+local pmAction_saveSlot, pmAction_save, pmAction_load, pmAction_poSync
+local pmAction_autoplay, pmAction_restore, pmAction_keepFx
+
+PATTERN_MENU = {
+    -- PAGE 1 — complex custom drawing, actions defined below
+    { id="patterns",   page=1, defer=true,  label=nil,
+      help1=function()
+          if patternCopyMode then return "COPY MODE: L/R to pick dest" end
+          return "A:load / Hold A 1s:copy / Hold B 1s:clear"
+      end,
+      help2=function()
+          if patternCopyMode then return "Release A to paste  |  src: P"..(patternCopySource or "?") end
+          return "Down:next / Crank:BPM"
+      end },
+    { id="chain",      page=1, defer=false, label=nil,
+      help1=function() return "A: toggle chain mode" end,
+      help2=function() return "B: back to grid" end },
+    { id="chainSlots", page=1, defer=false, label=nil,
+      help1=function()
+          if selectedChainSlot == 0 then return "A: PLAY ALL from start"
+          elseif selectedChainSlot == #chainList + 1 then return "A: add current pat to chain"
+          else return "A:set slot / Hold B 1s:del slot" end
+      end,
+      help2=function() return "L/R:move / Crank:change val / B: back to grid" end },
+    { id="chainSel",   page=1, defer=false, label=nil,
+      help1=function() return "L/R: switch pattern chain" end,
+      help2=function() return "B: back to grid" end },
+    { id="saveSlot",   page=1, defer=false, label=nil,
+      help1=function() return "L/R: change slot" end,
+      help2=function() return "B: back to grid" end },
+    { id="save",       page=1, defer=true,  label=nil,
+      help1=function() return "A: save" end,
+      help2=function() return "B: back to grid" end },
+    { id="load",       page=1, defer=true,  label=nil,
+      help1=function() return "A: load" end,
+      help2=function() return "B: back to grid" end },
+    { id="poSync",     page=1, defer=false, label=nil,
+      help1=function() return "A: toggle PO sync (SY1 equiv.)" end,
+      help2=function() return "Down: next page / B: back to grid" end },
+    -- PAGE 2 — uniform drawItem2 rendering
+    { id="autoplay",   page=2, defer=false,
+      label=function() return "PERF AUTOPLAY: " .. (perfAutoplay and "ON" or "OFF") end,
+      help1=function() return "A: toggle  (ON=immediate, OFF=queue)" end,
+      help2=function() return "Up: prev page / B: back to grid" end },
+    { id="restore",    page=2, defer=true,
+      label=function() return "RESTORE DEFAULTS" end,
+      help1=function() return "A: restore all to defaults" end,
+      help2=function() return "Up: prev page / B: back to grid" end },
+    { id="keepFx",     page=2, defer=false,
+      label=function() return "KEEP PERF FX: " .. (perfKeepFx and "ON" or "OFF") end,
+      help1=function() return "A: toggle" end,
+      help2=function() return "Up: prev page / B: back to grid" end },
+    { id="future1",    page=2, defer=false,
+      label=function() return "(future setting)" end,
+      help1=function() return "" end,
+      help2=function() return "Up: prev page / B: back to grid" end },
+    { id="future2",    page=2, defer=false,
+      label=function() return "(future setting)" end,
+      help1=function() return "" end,
+      help2=function() return "Up: prev page / B: back to grid" end },
+    { id="future3",    page=2, defer=false,
+      label=function() return "(future setting)" end,
+      help1=function() return "" end,
+      help2=function() return "Up: prev page / B: back to grid" end },
+    { id="future4",    page=2, defer=false,
+      label=function() return "(future setting)" end,
+      help1=function() return "" end,
+      help2=function() return "Up: prev page / B: back to grid" end },
+    { id="future5",    page=2, defer=false,
+      label=function() return "(future setting)" end,
+      help1=function() return "" end,
+      help2=function() return "Up: prev page / B: back to grid" end },
+    { id="future6",    page=2, defer=false,
+      label=function() return "(future setting)" end,
+      help1=function() return "" end,
+      help2=function() return "Up: prev page / B: back to grid" end },
+}
+
+-- Helper: get the current menu item
+local function pmCurrent() return PATTERN_MENU[patternUIRow] end
+local function pmId()      return pmCurrent().id end
+
+-- Helper: find row index by id
+local function pmRowOf(id)
+    for i, item in ipairs(PATTERN_MENU) do
+        if item.id == id then return i end
+    end
+    return nil
+end
 selectedChainSlot   = 1   -- 1..#chainList+1  (+1 = the "add" slot)
 
 -- Pattern copy state
@@ -559,21 +665,22 @@ local function drawPatternUI()
 	gfx.setColor(gfx.kColorBlack)
 	gfx.setLineWidth(1)
 
-	local PAGE_SIZE = 8
-	local page = (patternUIRow <= PAGE_SIZE) and 1 or 2
+	local item = pmCurrent()
+	local page = item.page
 	local PAGE_LABEL_X = 320
 
 	-- ============================================================
-	-- PAGE 1  (patternUIRow 1–8)
+	-- PAGE 1
 	-- ============================================================
 	if page == 1 then
+		local id = item.id
 
-		-- Pattern selection boxes
+		-- Pattern selection boxes (always visible on page 1)
 		for p = 1, MAX_PATTERNS do
 			local x = PAT_START_X + (p-1) * (PAT_BOX_W + 4)
 			local y = PAT_BOXES_Y
 			local isCurrent  = (p == currentPattern)
-			local isSelected = (patternUIRow == 1 and p == selectedPatternSlot)
+			local isSelected = (id == "patterns" and p == selectedPatternSlot)
 			local isCopySrc  = (patternCopyMode and p == patternCopySource)
 			gfx.setColor(gfx.kColorBlack)
 			if isSelected then gfx.setLineWidth(3) else gfx.setLineWidth(1) end
@@ -585,28 +692,28 @@ local function drawPatternUI()
 		end
 
 		-- Title
-		if patternUIRow == 1 then
+		if id == "patterns" then
 			gfx.drawText("PATTERN " .. selectedPatternSlot .. " BPM:" .. bpmValue, PAT_START_X, PAT_TITLE_Y)
 		else
 			gfx.drawText("PATTERN BPM:" .. bpmValue, PAT_START_X, PAT_TITLE_Y)
 		end
 
-		-- Row 2: Chain toggle
+		-- Row: chain toggle label
 		gfx.setColor(gfx.kColorBlack)
-		if patternUIRow == 2 then
+		if id == "chain" then
 			gfx.setLineWidth(3)
 			gfx.drawRect(PAT_START_X - 2, PAT_CHAIN_LABEL_Y - 2, 120, 16)
 			gfx.setLineWidth(1)
 		end
-		if patternUIRow == 3 and selectedChainSlot~=0 and selectedChainSlot < #chainList+1 then
+		if id == "chainSlots" and selectedChainSlot~=0 and selectedChainSlot < #chainList+1 then
 			gfx.drawText("CHAIN: " .. (chainEnabled and "ON " or "OFF") .. "(selected: " .. chainList[selectedChainSlot] ..")", PAT_START_X, PAT_CHAIN_LABEL_Y)
 		else
 			gfx.drawText("CHAIN: " .. (chainEnabled and "ON " or "OFF"), PAT_START_X, PAT_CHAIN_LABEL_Y)
 		end
 
-		-- Row 3: Chain slots
+		-- Row: chain slots
 		local PLAY_W = 28
-		local isPlaySel = (patternUIRow == 3 and selectedChainSlot == 0)
+		local isPlaySel = (id == "chainSlots" and selectedChainSlot == 0)
 		gfx.setColor(gfx.kColorBlack)
 		gfx.setLineWidth(isPlaySel and 3 or 1)
 		gfx.drawRect(PAT_START_X, PAT_CHAIN_ROW_Y, PLAY_W, 20)
@@ -616,158 +723,103 @@ local function drawPatternUI()
 		local SLOT_W, SLOT_GAP = 18, 4
 		for ci = 1, #chainList do
 			local x = slotOffX + (ci - 1) * (SLOT_W + SLOT_GAP)
-			local isSelected = (patternUIRow == 3 and ci == selectedChainSlot)
+			local isSelected = (id == "chainSlots" and ci == selectedChainSlot)
 			gfx.setLineWidth(isSelected and 3 or 1)
 			gfx.drawRect(x, PAT_CHAIN_ROW_Y, SLOT_W, 20)
 			gfx.setLineWidth(1)
 			gfx.drawText(tostring(chainList[ci]), x + 5, PAT_CHAIN_ROW_Y + 3)
 		end
 		local addX = slotOffX + #chainList * (SLOT_W + SLOT_GAP)
-		local isAddSel = (patternUIRow == 3 and selectedChainSlot == #chainList + 1)
+		local isAddSel = (id == "chainSlots" and selectedChainSlot == #chainList + 1)
 		gfx.setLineWidth(isAddSel and 3 or 1)
 		gfx.drawRect(addX, PAT_CHAIN_ROW_Y, SLOT_W, 20)
 		gfx.setLineWidth(1)
 		gfx.drawText("+", addX + 7, PAT_CHAIN_ROW_Y + 3)
 
-		-- Row 4: Chain selector
+		-- Row: chain selector
 		gfx.setColor(gfx.kColorBlack)
-		if patternUIRow == 4 then
+		if id == "chainSel" then
 			gfx.setLineWidth(3)
 			gfx.drawRect(PAT_START_X - 2, PAT_CHAIN_SEL_Y - 2, 320, 16)
 			gfx.setLineWidth(1)
 		end
 		gfx.drawText("CURRENT PATTERN CHAIN: " .. currentChainIndex .. " / " .. MAX_CHAINS, PAT_START_X, PAT_CHAIN_SEL_Y)
 
-		-- Row 5: Save slot
+		-- Row: save slot
 		gfx.setColor(gfx.kColorBlack)
-		if patternUIRow == 5 then
+		if id == "saveSlot" then
 			gfx.setLineWidth(3)
 			gfx.drawRect(PAT_START_X - 2, PAT_SAVE_SLOT_ROW_Y - 2, 220, 16)
 			gfx.setLineWidth(1)
 		end
 		gfx.drawText("PROJECT SLOT: " .. currentSaveSlot .. " / " .. MAX_SAVE_SLOTS, PAT_START_X, PAT_SAVE_SLOT_ROW_Y)
 
-		-- Row 6: Save
+		-- Row: save
 		gfx.setColor(gfx.kColorBlack)
-		if patternUIRow == 6 then
+		if id == "save" then
 			gfx.setLineWidth(3)
 			gfx.drawRect(PAT_START_X - 2, PAT_SAVE_ROW_Y - 2, 120, 16)
 			gfx.setLineWidth(1)
 		end
 		gfx.drawText("SAVE PROJECT", PAT_START_X, PAT_SAVE_ROW_Y)
 
-		-- Row 7: Load
+		-- Row: load
 		gfx.setColor(gfx.kColorBlack)
-		if patternUIRow == 7 then
+		if id == "load" then
 			gfx.setLineWidth(3)
 			gfx.drawRect(PAT_START_X - 2, PAT_LOAD_ROW_Y - 2, 120, 16)
 			gfx.setLineWidth(1)
 		end
 		gfx.drawText("LOAD PROJECT", PAT_START_X, PAT_LOAD_ROW_Y)
 
-		-- Row 8: PO Sync
+		-- Row: PO sync
 		gfx.setColor(gfx.kColorBlack)
-		if patternUIRow == 8 then
+		if id == "poSync" then
 			gfx.setLineWidth(3)
 			gfx.drawRect(PAT_START_X - 2, PAT_PO_SYNC_Y - 2, 150, 16)
 			gfx.setLineWidth(1)
 		end
 		gfx.drawText("PO SYNC: " .. (poSyncEnabled and "ON" or "OFF"), PAT_START_X, PAT_PO_SYNC_Y)
-
-		
 		gfx.drawText("Page 1/2", PAGE_LABEL_X, PAT_PO_SYNC_Y)
 
-
-		-- Help text page 1
+		-- Help text
 		gfx.drawLine(0, PAT_HELP_SEP_Y, 400, PAT_HELP_SEP_Y)
 		gfx.setColor(gfx.kColorBlack)
-		if patternUIRow == 1 then
-			if patternCopyMode then
-				gfx.drawText("COPY MODE: L/R to pick dest", PAT_START_X, PAT_HELP1_Y)
-				gfx.drawText("Release A to paste  |  src: P" .. (patternCopySource or "?"), PAT_START_X, PAT_HELP2_Y)
-			else
-				gfx.drawText("A:load / Hold A 1s:copy / Hold B 1s:clear", PAT_START_X, PAT_HELP1_Y)
-				gfx.drawText("Down:next / Crank:BPM", PAT_START_X, PAT_HELP2_Y)
-			end
-		elseif patternUIRow == 2 then
-			gfx.drawText("A: toggle chain mode", PAT_START_X, PAT_HELP1_Y)
-			gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
-		elseif patternUIRow == 3 then
-			if selectedChainSlot == 0 then
-				gfx.drawText("A: PLAY ALL from start", PAT_START_X, PAT_HELP1_Y)
-			elseif selectedChainSlot == #chainList + 1 then
-				gfx.drawText("A: add current pat to chain", PAT_START_X, PAT_HELP1_Y)
-			else
-				gfx.drawText("A:set slot / Hold B 1s:del slot", PAT_START_X, PAT_HELP1_Y)
-			end
-			gfx.drawText("L/R:move / Crank:change val / B: back to grid", PAT_START_X, PAT_HELP2_Y)
-		elseif patternUIRow == 4 then
-			gfx.drawText("L/R: switch pattern chain", PAT_START_X, PAT_HELP1_Y)
-			gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
-		elseif patternUIRow == 5 then
-			gfx.drawText("L/R: change slot", PAT_START_X, PAT_HELP1_Y)
-			gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
-		elseif patternUIRow == 6 then
-			gfx.drawText("A: save", PAT_START_X, PAT_HELP1_Y)
-			gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
-		elseif patternUIRow == 7 then
-			gfx.drawText("A: load", PAT_START_X, PAT_HELP1_Y)
-			gfx.drawText("B: back to grid", PAT_START_X, PAT_HELP2_Y)
-		elseif patternUIRow == 8 then
-			gfx.drawText("A: toggle PO sync (SY1 equiv.)", PAT_START_X, PAT_HELP1_Y)
-			gfx.drawText("Down: next page / B: back to grid", PAT_START_X, PAT_HELP2_Y)
-		end
+		gfx.drawText(item.help1(), PAT_START_X, PAT_HELP1_Y)
+		gfx.drawText(item.help2(), PAT_START_X, PAT_HELP2_Y)
 
 	-- ============================================================
-	-- PAGE 2  (patternUIRow 9–18)  — 10 items, equal spacing
+	-- PAGE 2 — uniform equal-spaced items
 	-- ============================================================
 	else
 		gfx.drawText("SETTINGS", PAT_START_X, PAT_TITLE_Y)
 		gfx.drawText("Page 2/2", PAGE_LABEL_X, PAT_PO_SYNC_Y)
 
-		-- Equal spacing: 10 items from PAT_CHAIN_LABEL_Y to PAT_HELP_SEP_Y
-		local P2_ROWS  = 9   -- rows 9..18
-		local P2_START = PAT_BOXES_Y                                          -- 48
-		local P2_STEP  = math.floor((PAT_HELP_SEP_Y - P2_START) / P2_ROWS)        -- 14px
+		-- Collect all page 2 items in order
+		local p2Items = {}
+		for _, m in ipairs(PATTERN_MENU) do
+			if m.page == 2 then p2Items[#p2Items+1] = m end
+		end
 
-		local function drawItem2(rowNum, label)
-			local idx = rowNum - PAGE_SIZE   -- 1..10
-			local y   = P2_START + (idx - 1) * P2_STEP
+		local P2_START = PAT_BOXES_Y
+		local P2_STEP  = math.floor((PAT_HELP_SEP_Y - P2_START) / #p2Items)
+
+		for i, m in ipairs(p2Items) do
+			local y = P2_START + (i - 1) * P2_STEP
 			gfx.setColor(gfx.kColorBlack)
-			if patternUIRow == rowNum then
+			if m.id == item.id then
 				gfx.setLineWidth(3)
 				gfx.drawRect(PAT_START_X - 2, y, 300, 18)
 				gfx.setLineWidth(1)
 			end
-			gfx.drawText(label, PAT_START_X, y)
+			gfx.drawText(m.label(), PAT_START_X, y)
 		end
 
-		-- Placeholder items — replace with real settings as needed
-		drawItem2(9,  "PERF AUTOPLAY: " .. (perfAutoplay and "ON" or "OFF"))
-		drawItem2(10, "RESTORE DEFAULTS")
-		drawItem2(11, "KEEP PERF FX: " .. (perfKeepFx and "ON" or "OFF"))
-		--[[
-		drawItem2(12, "(future setting)")
-		drawItem2(13, "(future setting)")
-		drawItem2(14, "(future setting)")
-		drawItem2(15, "(future setting)")
-		drawItem2(16, "(future setting)")
-		drawItem2(17, "(future setting)")
-		]]--
-
-		-- Help text page 2
+		-- Help text
 		gfx.drawLine(0, PAT_HELP_SEP_Y, 400, PAT_HELP_SEP_Y)
 		gfx.setColor(gfx.kColorBlack)
-		if patternUIRow == 9 then
-			gfx.drawText("A: toggle  (ON=immediate, OFF=queue)", PAT_START_X, PAT_HELP1_Y)
-			gfx.drawText("Up: prev page / B: back to grid", PAT_START_X, PAT_HELP2_Y)
-		elseif patternUIRow == 10 then
-			gfx.drawText("A: restore all to defaults", PAT_START_X, PAT_HELP1_Y)
-			gfx.drawText("Up: prev page / B: back to grid", PAT_START_X, PAT_HELP2_Y)
-		else
-			gfx.drawText("Up: prev page / B: back to grid", PAT_START_X, PAT_HELP1_Y)
-			gfx.drawText("", PAT_START_X, PAT_HELP2_Y)
-		end
+		gfx.drawText(item.help1(), PAT_START_X, PAT_HELP1_Y)
+		gfx.drawText(item.help2(), PAT_START_X, PAT_HELP2_Y)
 	end
 end
 
@@ -1908,8 +1960,8 @@ function playdate.update()
 		toastTimer -= 1
 	end
 
-	-- Copy mode hold timer: while A is held in pattern row 1
-	if uiMode == "pattern" and patternUIRow == 1 and playdate.buttonIsPressed(playdate.kButtonA) then
+	-- Copy mode hold timer: while A is held on "patterns" row
+	if uiMode == "pattern" and pmId() == "patterns" and playdate.buttonIsPressed(playdate.kButtonA) then
 		btnHoldAdj = true
 		if not patternCopyMode then
 			patternAHoldFrames += 1
@@ -1921,26 +1973,24 @@ function playdate.update()
 		end
 	end
 
-	-- B-hold timer: while B is held in pattern row 1, count toward pattern clear
-	if uiMode == "pattern" and patternUIRow == 1
+	-- B-hold timer: pattern clear on "patterns" row, chain slot delete on "chainSlots" row
+	if uiMode == "pattern" and pmId() == "patterns"
 	   and not patternBHoldUsed
 	   and not patternCopyMode
 	   and dialogMessage == nil
 	   and playdate.buttonIsPressed(playdate.kButtonB) then
 		patternBHoldFrames += 1
 		if patternBHoldFrames >= CLEAR_HOLD_FRAMES then
-			patternBHoldUsed   = true   -- prevent re-fire while still held
+			patternBHoldUsed   = true
 			patternBHoldFrames = 0
 			local targetPat    = selectedPatternSlot
 			showDialog("Clear pattern " .. targetPat .. "?", function(confirmed)
 				if confirmed then
-					-- Clear all track notes in the target pattern
 					for ti = 1, #tracks do
 						for s = 1, NUM_STEPS do
 							patterns[targetPat][ti].notes[s] = 0
 						end
 					end
-					-- If it's the currently active pattern, flush to the sequencer too
 					if targetPat == currentPattern then
 						loadPatternIntoSequence(currentPattern)
 					end
@@ -1950,7 +2000,7 @@ function playdate.update()
 			end)
 			drawGrid()
 		end
-	elseif uiMode == "pattern" and patternUIRow == 3
+	elseif uiMode == "pattern" and pmId() == "chainSlots"
 		and selectedChainSlot >= 1 and selectedChainSlot <= #chainList
 		and not patternBHoldUsed
 		and dialogMessage == nil
@@ -2014,49 +2064,38 @@ end
 -- ============================================================
 
 local function patternModeA()
-	if patternUIRow == 1 then
-		-- Pattern select
+	local id = pmId()
+	if id == "patterns" then
 		switchToPattern(selectedPatternSlot)
 		drawGrid()
-		return
-	elseif patternUIRow == 2 then
-		-- CHAIN TOGGLE
+	elseif id == "chain" then
 		chainEnabled = not chainEnabled
 		chainStep = 1
 		drawGrid()
-		return
-	elseif patternUIRow == 3 then
-		-- Chain row
+	elseif id == "chainSlots" then
 		bUsedToExitPtn = true
 		if selectedChainSlot == 0 then
 			chainEnabled = true
 			chainStep = 1
 			currentPattern = chainList[1]
 			loadPatternIntoSequence(currentPattern)
-			sequence:goToStep(1)   -- ← always reset to bar start
+			sequence:goToStep(1)
 			if not isRunning then
 				isRunning = true
 				sequence:play(onBarFinish)
 			end
-			bUsedToExitPtn = true    
+			bUsedToExitPtn = true
 			uiMode = "grid"
 			drawGrid()
-			return
-
 		elseif selectedChainSlot == #chainList + 1 then
 			chainList[#chainList+1] = currentPattern
 			selectedChainSlot = #chainList
 			drawGrid()
-			return
-
 		else
 			chainList[selectedChainSlot] = selectedPatternSlot
 			drawGrid()
-			return
 		end
-
-	elseif patternUIRow == 6 then
-		-- SAVE: confirm before overwriting
+	elseif id == "save" then
 		local slot = currentSaveSlot
 		showDialog("Save to slot " .. slot .. "?", function(confirmed)
 			if confirmed then
@@ -2066,10 +2105,7 @@ local function patternModeA()
 			drawGrid()
 		end)
 		drawGrid()
-		return
-
-	elseif patternUIRow == 7 then
-		-- LOAD: confirm before discarding unsaved changes
+	elseif id == "load" then
 		local slot = currentSaveSlot
 		showDialog("Load slot " .. slot .. "? Unsaved changes lost.", function(confirmed)
 			if confirmed then
@@ -2080,24 +2116,18 @@ local function patternModeA()
 			drawGrid()
 		end)
 		drawGrid()
-		return
-
-	elseif patternUIRow == 8 then
-		-- PO SYNC TOGGLE
+	elseif id == "poSync" then
 		poSyncEnabled = not poSyncEnabled
 		updatePOSyncTrack()
 		drawGrid()
-		return
-	elseif patternUIRow > 8 then
-		if patternUIRow == 9 then
-			perfAutoplay = not perfAutoplay
-			drawGrid()
-		elseif patternUIRow == 11 then
-			perfKeepFx = not perfKeepFx
-			drawGrid()
-		end
-		-- row 10 (restore defaults) is handled in AButtonUp via dialog
-		return
+	elseif id == "autoplay" then
+		perfAutoplay = not perfAutoplay
+		drawGrid()
+	elseif id == "keepFx" then
+		perfKeepFx = not perfKeepFx
+		drawGrid()
+	elseif id == "restore" then
+		-- handled in AButtonUp via dialog
 	end
 end
 
@@ -2143,17 +2173,17 @@ function playdate.leftButtonDown()
 	if performanceMode then perfLeftDown(); return end
 	if dialogMessage ~= nil then return end
 	if uiMode == "pattern" then
-		if patternUIRow == 1 then
+		local id = pmId()
+		if id == "patterns" then
 			if selectedPatternSlot > 1 then selectedPatternSlot = selectedPatternSlot - 1 end
-		elseif patternUIRow == 4 then
-			-- Chain selector: switch to previous chain
+		elseif id == "chainSel" then
 			if currentChainIndex > 1 then
-				switchToChain(currentChainIndex - 1)				
-				selectedChainSlot = 1				
+				switchToChain(currentChainIndex - 1)
+				selectedChainSlot = 1
 			end
-		elseif patternUIRow == 5 then
+		elseif id == "saveSlot" then
 			if currentSaveSlot > 1 then currentSaveSlot = currentSaveSlot - 1 end
-		elseif patternUIRow == 3 then
+		elseif id == "chainSlots" then
 			if selectedChainSlot > 0 then selectedChainSlot = selectedChainSlot - 1 end
 		end
 		drawGrid()
@@ -2171,17 +2201,17 @@ function playdate.rightButtonDown()
 	if performanceMode then perfRightDown(); return end
 	if dialogMessage ~= nil then return end
 	if uiMode == "pattern" then
-		if patternUIRow == 1 then
+		local id = pmId()
+		if id == "patterns" then
 			if selectedPatternSlot < MAX_PATTERNS then selectedPatternSlot = selectedPatternSlot + 1 end
-		elseif patternUIRow == 4 then
-			-- Chain selector: switch to next chain (up to MAX_CHAINS)
+		elseif id == "chainSel" then
 			if currentChainIndex < MAX_CHAINS then
 				switchToChain(currentChainIndex + 1)
-				selectedChainSlot = 1								
+				selectedChainSlot = 1
 			end
-		elseif patternUIRow == 5 then
+		elseif id == "saveSlot" then
 			if currentSaveSlot < MAX_SAVE_SLOTS then currentSaveSlot = currentSaveSlot + 1 end
-		elseif patternUIRow == 3 then
+		elseif id == "chainSlots" then
 			if selectedChainSlot < #chainList + 1 then selectedChainSlot = selectedChainSlot + 1 end
 		end
 		drawGrid()
@@ -2202,10 +2232,6 @@ function playdate.upButtonDown()
 	if uiMode == "pattern" then
 		if patternUIRow > 1 then
 			patternUIRow -= 1
-		--else
-			-- keep your existing chain toggle here
-		--	chainEnabled = not chainEnabled
-		--	chainStep = 1
 		end
 		drawGrid()
 		return
@@ -2231,8 +2257,7 @@ function playdate.downButtonDown()
 	if performanceMode then perfDownDown(); return end
 	if dialogMessage ~= nil then return end
 	if uiMode == "pattern" then
-		--if patternUIRow < 17 then
-		if patternUIRow < 11 then
+		if patternUIRow < #PATTERN_MENU then
 			patternUIRow += 1
 		end
 		drawGrid()
@@ -2280,15 +2305,9 @@ function playdate.AButtonDown()
 
 	if uiMode == "pattern" then
 	
-		-- Rows that open a dialog must be deferred to AButtonUp,
-		-- otherwise the Up event immediately confirms the dialog that Down just opened.
-		-- Row 1: hold timer runs in update(); tap handled in AButtonUp.
-		-- Row 4 (save) and Row 5 (load): open a dialog, so also deferred to AButtonUp.
-		local deferToUp = patternUIRow == 1
-			or patternUIRow == 6
-			or patternUIRow == 7
-			or patternUIRow == 10
-			or (patternUIRow == 3 and selectedChainSlot == 0)
+		local item = pmCurrent()
+		local deferToUp = item.defer
+			or (pmId() == "chainSlots" and selectedChainSlot == 0)
 		if deferToUp then
 			patternAHoldFrames = 0
 		else
@@ -2311,7 +2330,8 @@ function playdate.AButtonUp()
 		return
 	end
 	if uiMode == "pattern" then
-		if patternUIRow == 1 then
+		local id = pmId()
+		if id == "patterns" then
 			if patternCopyMode then
 				local dest = selectedPatternSlot
 				local src  = patternCopySource
@@ -2337,11 +2357,11 @@ function playdate.AButtonUp()
 				end
 				patternAHoldFrames = 0
 			end
-		elseif patternUIRow == 6 or patternUIRow == 7 then
+		elseif id == "save" or id == "load" then
 			patternModeA()
-		elseif patternUIRow == 3 and selectedChainSlot == 0 then
+		elseif id == "chainSlots" and selectedChainSlot == 0 then
 			patternModeA()
-		elseif patternUIRow == 10 then
+		elseif id == "restore" then
 			showDialog("Restore all defaults? This clears all patterns.", function(confirmed)
 				if confirmed then
 					for p = 1, MAX_PATTERNS do
@@ -2558,7 +2578,7 @@ function playdate.cranked(change, acceleratedChange)
 			btnHoldAdj = true
 			local dir = crankAccum > 0 and 1 or -1
 			crankAccum = 0
-			if patternUIRow == 3 and selectedChainSlot >= 1 and selectedChainSlot <= #chainList then
+			if pmId() == "chainSlots" and selectedChainSlot >= 1 and selectedChainSlot <= #chainList then
 				local v = math.max(1, math.min(MAX_PATTERNS, chainList[selectedChainSlot] + dir))
 				chainList[selectedChainSlot] = v
 			else
