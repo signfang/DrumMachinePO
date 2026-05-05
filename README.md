@@ -48,10 +48,13 @@ Crank:
 - No modifier: change the pattern
 - Hold A + crank: change BPM
 - Hold B + crank: change Swing amount
+- (track name selected): change the user sample
 
 **Patterns/Settings view**
 
-![alt text](Settings.gif "Settings")
+![alt text](Settings1.gif "Settings1")
+
+![alt text](Settings2.gif "Settings2")
 
 You can access the patterns/settings menu via Playdate System menu.
 
@@ -77,13 +80,16 @@ D-PAD:
 - Double Tap: Play the assigned pattern immediately
 - Hold Direction+Crank: Change the assigned pattern chain 
 
-A: Cycle through "effects". Only BPM/Swing for now (To be added)
+A: Cycle through "effects". BPM/Swing/Filter(LPF/HPF)/Bitcrusher/Delay
 
 B: Start/Stop playing, Double-tap to go all the way back.
+
+If "KEEP PERF FX" setting is on, FXs that are changed in the performance mode is also applied in the grid mode.
 
 
 **Using user samples**
 
+![alt text](Grid.gif "grid")
 
 DrumMachinPO looks for the user sample files when starting up. 
 
@@ -95,11 +101,20 @@ Put sample files in Shared/DrumMachinePO/Samples folder to use it instead of the
 
 Sample names should match the ones in the following list.
 
-'KickDrum', 'SnareDrum', 'HHClosed', 'HHOpen', 'TomHi', 'TomMid', 'TomLow', 'Clap', 'Clav', 'Rimshot', 'Cowbell', 'Maraca', 'CongaHi', 'CongaMid', 'CongaLow'
+**'KickDrum', 'SnareDrum', 'HHClosed', 'HHOpen', 'TomHi', 'TomMid', 'TomLow', 'Clap', 'Clav', 'Rimshot', 'Cowbell', 'Maraca', 'CongaHi', 'CongaMid', 'CongaLow'**
 
-If suffix numbers are added on the file name, e.g. KickDrum1.pda, KickDrum2.pda... DrumMachinePO will add all of them for each banks. 
+If suffix numbers are added on the file name, e.g. **KickDrum1.pda, KickDrum2.pda**... DrumMachinePO will add all of them for each banks. 
 
-Use crank on the track name, then use the crank to select the sample for the bank.
+Alternatively, you can name your samples like this:
+
+**'Bank1_mySample.pda'**
+
+Then it will be shown up in the Bank 1 - which is the KickDrum - with names shown as 'mySample'
+
+You can see the names in the figure, I've loaded a sample with name 'Bank15_Crash.pda', then changed its bank number so it shows up as such.
+
+Use crank on the track name, then use the crank to select the sample for the bank. It also plays the current sound when you crank on the track name.
+
 
 
 
