@@ -267,23 +267,6 @@ sequence:addTrack(metroTrack)
 local metroChannel = snd.channel.new()
 metroChannel:addSource(metroInstrument)
 
-local function updateMetronomeTrack()
-	if not metronomeEnabled then
-		metroTrack:setNotes({})
-		return
-	end
-	local list = {}
-	for step = 1, NUM_STEPS, 4 do  -- quarter notes: steps 1, 5, 9, 13
-		list[#list+1] = {
-			note     = 70,
-			step     = toInternalStep(step),
-			length   = STEP_SCALE - 3,
-			velocity = 1.0
-		}
-	end
-	metroTrack:setNotes(list)
-end
-
 
 -- ============================================================
 -- AUDIO CHANNEL ROUTING
@@ -347,6 +330,24 @@ local function applyPanRouting()
 		metroChannel:setPan(0)
 		syncChannel:setVolume(0)   -- click silent (notes cleared separately)
 	end
+end
+
+local function updateMetronomeTrack()
+	applyPanRouting()
+	if not metronomeEnabled then
+		metroTrack:setNotes({})
+		return
+	end
+	local list = {}
+	for step = 1, NUM_STEPS, 4 do  -- quarter notes: steps 1, 5, 9, 13
+		list[#list+1] = {
+			note     = 70,
+			step     = toInternalStep(step),
+			length   = STEP_SCALE - 3,
+			velocity = 1.0
+		}
+	end
+	metroTrack:setNotes(list)
 end
 
 
@@ -2617,16 +2618,16 @@ function playdate.cranked(change, acceleratedChange)
 				drawGrid()
 			end
 		else
-			if math.abs(crankAccum) >= 10 then
+			if math.abs(crankAccum) >= 20 then
 				local dir = crankAccum > 0 and 1 or -1
 				crankAccum = 0
 				-- Track name selected + multi-sample: switch bank
 				if selectedColumn == 0 then
 					local tr = tracks[selectedRow]
+					tr.inst:playMIDINote(60, 1)
 					if #tr.bank > 1 then
 						switchTrackBank(tr, tr.bankIdx + dir)
-						drawGrid()
-						
+						drawGrid()						
 					end
 					return
 				end
