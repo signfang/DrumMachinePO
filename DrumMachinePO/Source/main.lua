@@ -40,6 +40,26 @@ local function cutActiveVoices()
         tr.inst:allNotesOff()
     end
 end
+-- ============================================================
+-- INTERNAL STEP RESOLUTION SCALING
+--
+-- The Playdate SDK's sequence:setNotes() step positions are truncated
+-- to integers before scheduling. Swing delays even steps by amounts
+-- like 0.05, 0.10 … 0.50 (in 1/16th-note units). To preserve these
+-- as whole integers we multiply every internal step position and the
+-- tempo by STEP_SCALE.
+--
+-- swingAmount comes in increments of 0.05 steps.
+-- STEP_SCALE = 20 turns 0.05 → 1, 0.50 → 10 — all exact integers.
+-- Every note step, loop bound, and tempo is multiplied by STEP_SCALE.
+-- getCurrentStep() returns scaled steps; divide by STEP_SCALE to
+-- recover the 1-based grid column for UI/chain logic.
+-- ============================================================
+local STEP_SCALE = 20   -- must be divisible by all swing increments (0.05 → ×20 = 1)
+
+local function toInternalStep(gridSlot)
+	return (gridSlot - 1) * STEP_SCALE + 1
+end
 
 -- ============================================================
 -- TRACK / INSTRUMENT SETUP
@@ -229,6 +249,41 @@ poInstrument:addVoice(clickSynth)
 poTrack:setInstrument(poInstrument)
 sequence:addTrack(poTrack)
 
+-- Metronome track: quarter-note click on beats 1, 5, 9, 13
+metronomeEnabled = false
+local metroTrack      = snd.track.new()
+local metroInstrument = snd.instrument.new()
+--local metroSynth      = snd.synth.new(clickSample)
+-- metroSynth:setVolume(0.8)
+local metroSynth = snd.synth.new(playdate.sound.kWaveTriangle)
+metroSynth:setVolume(0.15)
+metroSynth:setADSR(0, 0.05, 0, 0)  -- instant attack, short decay, no sustain
+
+
+metroInstrument:addVoice(metroSynth)
+metroTrack:setInstrument(metroInstrument)
+sequence:addTrack(metroTrack)
+
+local metroChannel = snd.channel.new()
+metroChannel:addSource(metroInstrument)
+
+local function updateMetronomeTrack()
+	if not metronomeEnabled then
+		metroTrack:setNotes({})
+		return
+	end
+	local list = {}
+	for step = 1, NUM_STEPS, 4 do  -- quarter notes: steps 1, 5, 9, 13
+		list[#list+1] = {
+			note     = 70,
+			step     = toInternalStep(step),
+			length   = STEP_SCALE - 3,
+			velocity = 1.0
+		}
+	end
+	metroTrack:setNotes(list)
+end
+
 
 -- ============================================================
 -- AUDIO CHANNEL ROUTING
@@ -293,22 +348,6 @@ local function applyPanRouting()
 end
 
 
--- ============================================================
--- INTERNAL STEP RESOLUTION SCALING
---
--- The Playdate SDK's sequence:setNotes() step positions are truncated
--- to integers before scheduling. Swing delays even steps by amounts
--- like 0.05, 0.10 … 0.50 (in 1/16th-note units). To preserve these
--- as whole integers we multiply every internal step position and the
--- tempo by STEP_SCALE.
---
--- swingAmount comes in increments of 0.05 steps.
--- STEP_SCALE = 20 turns 0.05 → 1, 0.50 → 10 — all exact integers.
--- Every note step, loop bound, and tempo is multiplied by STEP_SCALE.
--- getCurrentStep() returns scaled steps; divide by STEP_SCALE to
--- recover the 1-based grid column for UI/chain logic.
--- ============================================================
-local STEP_SCALE = 20   -- must be divisible by all swing increments (0.05 → ×20 = 1)
 
 -- swingOffset: returns the swing delay for a given 1-based grid slot,
 -- already multiplied by STEP_SCALE so the result is a whole integer.
@@ -324,9 +363,6 @@ end
 
 -- Convert a 1-based grid slot to a scaled internal step position.
 -- All positions passed to setNotes must go through this function.
-local function toInternalStep(gridSlot)
-	return (gridSlot - 1) * STEP_SCALE + 1
-end
 
 local function updateTrack(t, notes)
 	local list = {}
@@ -442,6 +478,7 @@ function setBPM(bpm)
 	local stepsPerSecond = 4 * (bpm / 60) * STEP_SCALE
 	sequence:setTempo(stepsPerSecond)
 	updatePOSyncTrack()
+	updateMetronomeTrack()
 end
 
 setBPM(bpmValue)
@@ -542,18 +579,20 @@ PATTERN_MENU = {
       label=function() return "PERF AUTOPLAY: " .. (perfAutoplay and "ON" or "OFF") end,
       help1=function() return "A: toggle  (ON=immediate, OFF=queue)" end,
       help2=function() return "Up: prev page / B: back to grid" end },
-    { id="restore",    page=2, defer=true,
-      label=function() return "RESTORE DEFAULTS" end,
-      help1=function() return "A: restore all to defaults" end,
-      help2=function() return "Up: prev page / B: back to grid" end },
+
     { id="keepFx",     page=2, defer=false,
       label=function() return "KEEP PERF FX: " .. (perfKeepFx and "ON" or "OFF") end,
       help1=function() return "A: toggle" end,
       help2=function() return "Up: prev page / B: back to grid" end },
-    { id="future1",    page=2, defer=false,
-      label=function() return "(future setting)" end,
-      help1=function() return "" end,
+    { id="metronome",  page=2, defer=false,
+      label=function() return "METRONOME: " .. (metronomeEnabled and "ON" or "OFF") end,
+      help1=function() return "A: toggle" end,
       help2=function() return "Up: prev page / B: back to grid" end },
+	{ id="restore",    page=2, defer=true,
+      label=function() return "RESTORE DEFAULTS" end,
+      help1=function() return "A: restore all to defaults" end,
+      help2=function() return "Up: prev page / B: back to grid" end },
+	--[[
     { id="future2",    page=2, defer=false,
       label=function() return "(future setting)" end,
       help1=function() return "" end,
@@ -574,6 +613,7 @@ PATTERN_MENU = {
       label=function() return "(future setting)" end,
       help1=function() return "" end,
       help2=function() return "Up: prev page / B: back to grid" end },
+	  ]]--
 }
 
 -- Helper: get the current menu item
@@ -1841,6 +1881,7 @@ local function perfBUp()
 		isRunning = not isRunning
 		if isRunning then
 			updatePOSyncTrack()
+			updateMetronomeTrack()
 			sequence:play(onBarFinish)
 		else
 			sequence:stop()
@@ -2119,12 +2160,17 @@ local function patternModeA()
 	elseif id == "poSync" then
 		poSyncEnabled = not poSyncEnabled
 		updatePOSyncTrack()
+		updateMetronomeTrack()
 		drawGrid()
 	elseif id == "autoplay" then
 		perfAutoplay = not perfAutoplay
 		drawGrid()
 	elseif id == "keepFx" then
 		perfKeepFx = not perfKeepFx
+		drawGrid()
+	elseif id == "metronome" then
+		metronomeEnabled = not metronomeEnabled
+		updateMetronomeTrack()
 		drawGrid()
 	elseif id == "restore" then
 		-- handled in AButtonUp via dialog
@@ -2232,6 +2278,8 @@ function playdate.upButtonDown()
 	if uiMode == "pattern" then
 		if patternUIRow > 1 then
 			patternUIRow -= 1
+		else
+			patternUIRow = #PATTERN_MENU  -- wrap to bottom
 		end
 		drawGrid()
 		return
@@ -2259,6 +2307,8 @@ function playdate.downButtonDown()
 	if uiMode == "pattern" then
 		if patternUIRow < #PATTERN_MENU then
 			patternUIRow += 1
+		else
+			patternUIRow = 1  -- wrap to top
 		end
 		drawGrid()
 		return
@@ -2382,6 +2432,8 @@ function playdate.AButtonUp()
 					chainStep    = 1
 					perfAutoplay = true
 					perfKeepFx   = false
+					metronomeEnabled = false
+					updateMetronomeTrack()
 					perfFilterParam = 0
 					perfFilterLPF:setMix(0)
 					perfFilterHPF:setMix(0)
@@ -2486,6 +2538,7 @@ function playdate.BButtonUp()
 			isRunning = not isRunning
 			if isRunning then
 				updatePOSyncTrack()
+				updateMetronomeTrack()
 				sequence:play(onBarFinish)
 			else
 				sequence:stop()
@@ -2658,3 +2711,4 @@ end
 
 drawGrid()
 updatePOSyncTrack()
+updateMetronomeTrack()
