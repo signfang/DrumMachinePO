@@ -1634,26 +1634,8 @@ drawPerformanceMode = function()
 	for _, dir in ipairs(dirOrder) do
 		parts[#parts+1] = string.upper(dir:sub(1,1)) .. ":" .. perfDirChain[dir]
 	end
-	gfx.drawText(table.concat(parts, " "), 4, 42)
+	gfx.drawText(table.concat(parts, " | "), 130, 42)
 
-	-- Status line 2: play state + effect
-	local playTag = isRunning and "PLAY" or "STOP"
-	local fx = PERF_FX_NAMES[perfFxIndex]
-	local fxVal = ""
-	if fx == "BPM" then
-		fxVal = tostring(bpmValue)
-	elseif fx == "Swing" then
-		fxVal = math.floor(swingAmount * 100 + 0.5) .. "%"
-	elseif fx == "Filter" then
-		local dir = perfFilterParam < 0 and "Low Pass: " or "High Pass: "
-		
-		fxVal = dir .. " " .. string.format("%.2f", perfFilterParam)
-	elseif fx == "Delay" then
-		fxVal = math.floor(perfReverbParam * 100 + 0.5) .. "%"
-	elseif fx == "Bitcrusher" then
-		fxVal = math.floor(perfBitcrushParam * 100 + 0.5) .. "%"
-	end
-	gfx.drawText(playTag .. "  FX >[" .. fx .. "] " .. fxVal, 4, 58)
 
 	-- Chain display: centered, chain name at top, boxes below
 	local BOX_W   = 18
@@ -1662,7 +1644,7 @@ drawPerformanceMode = function()
 	local chainLen   = #chainList
 	local totalW     = chainLen * BOX_W + (chainLen - 1) * BOX_GAP
 	local chainStartX = math.floor((400 - totalW) / 2)
-	local chainNameY  = 82
+	local chainNameY  = 68
 	local boxY        = chainNameY + 24
 
 	-- Chain name centred above boxes
@@ -1690,7 +1672,25 @@ drawPerformanceMode = function()
 
 	-- Held dir hint
 	local heldStr = perfHeldDir and ("Hold:" .. perfHeldDir) or ""
-	gfx.drawText(heldStr, 4, boxY + BOX_H + 6)
+	gfx.drawText(heldStr, 300, boxY + BOX_H + 20)
+
+	local playTag = isRunning and "PLAY" or "STOP"
+	local fx = PERF_FX_NAMES[perfFxIndex]
+	local fxVal = ""
+	if fx == "BPM" then
+		fxVal = tostring(bpmValue)
+	elseif fx == "Swing" then
+		fxVal = math.floor(swingAmount * 100 + 0.5) .. "%"
+	elseif fx == "Filter" then
+		local dir = perfFilterParam < 0 and "Low Pass: " or "High Pass: "
+		
+		fxVal = dir .. " " .. string.format("%.2f", perfFilterParam)
+	elseif fx == "Delay" then
+		fxVal = math.floor(perfReverbParam * 100 + 0.5) .. "%"
+	elseif fx == "Bitcrusher" then
+		fxVal = math.floor(perfBitcrushParam * 100 + 0.5) .. "%"
+	end
+	gfx.drawText(playTag .. "  FX >[" .. fx .. "] " .. fxVal, 4, boxY + BOX_H + 20)
 
 	-- Button hints
 	gfx.drawLine(0, 160, 400, 160)
