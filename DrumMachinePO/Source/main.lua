@@ -1,5 +1,5 @@
 -- Drum Machine with Multi-Pattern Chaining and Project Save/Load
--- Target: Playdate SDK 3.0.3
+-- Target: Playdate SDK 3.0.6
 -- B button starts/stops playback. Sequence does NOT auto-start.
 
 isRunning = false
@@ -339,10 +339,12 @@ syncChannel:addSource(poInstrument)
 local function applyPanRouting()
 	if poSyncEnabled then
 		drumChannel:setPan(1.0)    -- drums hard right
+		metroChannel:setPan(1.0)
 		syncChannel:setPan(-1.0)   -- click hard left
 		syncChannel:setVolume(1.0)
 	else
 		drumChannel:setPan(0)      -- drums center (both channels)
+		metroChannel:setPan(0)
 		syncChannel:setVolume(0)   -- click silent (notes cleared separately)
 	end
 end
