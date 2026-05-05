@@ -2086,12 +2086,14 @@ local function setTrackNote(track, pos, val)
 	-- SDK: instrument:playNote(note, volume, length, when)
 	-- Omitting length and when plays indefinitely until noteOff; that's fine for preview.
 	if not isRunning then
-		track.inst:playNote(60, val/LEVEL_INCREMENTS)
+		track.inst:playMIDINote(60, val/LEVEL_INCREMENTS)
 	end
 end
 
-local adjusted = false
-local adjusting = false
+local adjusted   = false
+local adjusting  = false
+local aLeftCount  = 0   -- how many times left was pressed while A was held
+local aRightCount = 0   -- how many times right was pressed while A was held
 
 local function adjustSelectedNote(delta)
 	local track = tracks[selectedRow]
@@ -2237,9 +2239,15 @@ function playdate.leftButtonDown()
 		drawGrid()
 		return
 	end
-	if adjusting then playdate.AButtonUp(); adjusted = true end
+	if adjusting then
+		if selectedColumn > 0 then   -- only count when a step is selected
+			aLeftCount = aLeftCount + 1
+			adjusted = true
+		end
+		return
+	
 	-- column 0 = track name selected; left from col 1 enters name column
-	if selectedColumn > 0 then
+	elseif selectedColumn > 0 then
 		selectedColumn = selectedColumn - 1
 		drawGrid()
 	end
@@ -2265,8 +2273,13 @@ function playdate.rightButtonDown()
 		drawGrid()
 		return
 	end
-	if adjusting then playdate.AButtonUp(); adjusted = true end
-	if selectedColumn < NUM_STEPS then
+	if adjusting then
+		if selectedColumn > 0 then   -- only count when a step is selected
+			aRightCount = aRightCount + 1
+			adjusted = true
+		end
+		return
+	elseif selectedColumn < NUM_STEPS then
 		selectedColumn = selectedColumn + 1
 		drawGrid()
 	end
@@ -2368,9 +2381,11 @@ function playdate.AButtonDown()
 		return
 	end
 	if selectedColumn == 0 then return end   -- track name selected: A reserved for future use
-	adjusted = false
-	adjusting = true
-	aBPMUsed = false
+	adjusted      = false
+	adjusting     = true
+	aBPMUsed      = false
+	aLeftCount    = 0
+	aRightCount   = 0
 end
 
 function playdate.AButtonUp()
@@ -2470,8 +2485,14 @@ function playdate.AButtonUp()
 		drawGrid()
 		return
 	end
+	print(aLeftCount, aRightCount)
 	adjusting = false
-	if adjusted then return end
+	if adjusted then
+		-- A+left/right: counts available for per-note effects (placeholder)
+		aLeftCount  = 0
+		aRightCount = 0
+		return
+	end
 	local track = tracks[selectedRow]
 	if not aBPMUsed then
 		if track.notes[selectedColumn] == 0 then
