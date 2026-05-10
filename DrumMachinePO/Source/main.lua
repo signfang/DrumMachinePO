@@ -367,7 +367,7 @@ end
 -- Convert a 1-based grid slot to a scaled internal step position.
 -- All positions passed to setNotes must go through this function.
 
-local function updateTrack(t, notes)
+local function updateTrack(t, notes, logicalNotes)
 	local list = {}
 	for i = 1, #notes do
 		if notes[i] > 0 then
@@ -380,7 +380,7 @@ local function updateTrack(t, notes)
 		end
 	end
 	t.track:setNotes(list)
-	t.notes = notes   -- notes[] always holds integer velocities, never play positions
+	t.notes = logicalNotes or notes   -- notes[] always holds integer velocities, never play positions
 end
 -- Reapply swing to all tracks (called when swingAmount changes)
 local function applySwingToAllTracks()
@@ -400,7 +400,7 @@ end
 
 edgeNextPattern = nil
 
-local function loadPatternIntoSequence(patIdx)
+local function loadPatternIntoSequence(patIdx, omitGridStep)
 	--dest = patIdx
 	-- if currentPattern~=prevPattern and patIdx==currentPattern then
 	-- 	print("Pattern edge:",prevPattern,"->",currentPattern)
@@ -411,8 +411,13 @@ local function loadPatternIntoSequence(patIdx)
 	for ti = 1, #tracks do
 		local pnotes = patterns[patIdx][ti].notes
 		local copy = {}
-		for s = 1, NUM_STEPS do copy[s] = pnotes[s] end
-		updateTrack(tracks[ti], copy)
+		local logicalCopy = nil
+		if omitGridStep ~= nil then logicalCopy = {} end
+		for s = 1, NUM_STEPS do
+			copy[s] = (s == omitGridStep) and 0 or pnotes[s]
+			if logicalCopy ~= nil then logicalCopy[s] = pnotes[s] end
+		end
+		updateTrack(tracks[ti], copy, logicalCopy)
 	end
 end
 
@@ -1620,6 +1625,38 @@ local function perfQueueChain(chainIdx)
 
 end
 
+local transitionRestorePattern = nil
+
+local function applyPendingPatternPreload()
+	local targetPattern = nil
+
+	if performanceMode and perfPendingChainIdx ~= nil then
+		currentChainIndex   = perfPendingChainIdx
+		chainList           = chains[currentChainIndex]
+		chainStep           = 1
+		perfPendingChainIdx = nil
+		targetPattern       = chainList[1]
+	elseif crankQueuedPattern ~= nil then
+		targetPattern       = crankQueuedPattern
+		crankQueuedPattern  = nil
+		crankShadowSlot     = nil
+	elseif chainEnabled and #chainList > 1 then
+		chainStep     = chainStep % #chainList + 1
+		chainList     = chains[currentChainIndex]
+		targetPattern = chainList[chainStep]
+	end
+
+	chainList = chains[currentChainIndex]   -- re-point alias defensively
+
+	if targetPattern == nil then return false end
+
+	saveCurrentPatternFromTracks()
+	currentPattern = targetPattern
+	loadPatternIntoSequence(currentPattern, NUM_STEPS)
+	transitionRestorePattern = currentPattern
+	return true
+end
+
 -- ---- Draw ---------------------------------------------------
 drawPerformanceMode = function()
 	gfx.lockFocus(grid)
@@ -1934,9 +1971,9 @@ end
 -- MAIN UPDATE
 -- ============================================================
 
-local laststep         = 0
-local lastStepForChain = 0  -- used to detect wrap from step 16 -> step 1
+local laststep = 0
 local prevRawStep = 0
+local BAR_PRELOAD_STEP = toInternalStep(NUM_STEPS)
 
 function playdate.update()
 	
@@ -1945,44 +1982,28 @@ function playdate.update()
 	-- math.ceil maps internal steps 1..STEP_SCALE → grid 1, STEP_SCALE+1..2×STEP_SCALE → grid 2, etc.
 	local step = math.ceil(rawStep / STEP_SCALE)
 	
-
-	-- Chain advancement: when step wraps from NUM_STEPS back to 1
-	
-	
 	if perfAPendingAdvance and playdate.getCurrentTimeMilliseconds() - perfLastATapMs >= DOUBLE_TAP_A_MS then
 		perfAPendingAdvance = false
 		perfFxIndex = (perfFxIndex % #PERF_FX_NAMES) + 1
 		drawPerformanceMode()
 	end
 
-
-	if isRunning and step == NUM_STEPS and lastStepForChain == NUM_STEPS - 1 then
-		if performanceMode and perfPendingChainIdx ~= nil then
-			currentChainIndex   = perfPendingChainIdx
-			chainList           = chains[currentChainIndex]
-			chainStep           = 1
-			perfPendingChainIdx = nil
-			nextPattern         = chainList[1]
-		elseif chainEnabled and #chainList > 1 then
-			chainStep   = chainStep % #chainList + 1
-			nextPattern = chainList[chainStep]
+	if isRunning and transitionRestorePattern ~= nil and rawStep < prevRawStep then
+		if currentPattern == transitionRestorePattern then
+			loadPatternIntoSequence(transitionRestorePattern)
 		end
-		chainList = chains[currentChainIndex]   -- re-point alias defensively
-		drawGrid()
+		transitionRestorePattern = nil
 	end
 
-	
-	lastStepForChain = step
 
-	if step==1 and nextPattern~=nil then
-		if not performanceMode then
-			saveCurrentPatternFromTracks()
+	if isRunning and rawStep >= BAR_PRELOAD_STEP and prevRawStep < BAR_PRELOAD_STEP then
+		if applyPendingPatternPreload() then
+			if performanceMode then
+				drawPerformanceMode()
+			else
+				drawGrid()
+			end
 		end
-		currentPattern = nextPattern
-		loadPatternIntoSequence(currentPattern)
-		cutActiveVoices()
-		
-		nextPattern=nil
 	end
 
 	perfCurrentStep = step
