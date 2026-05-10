@@ -487,7 +487,8 @@ end
 setBPM(bpmValue)
 -- Loop from internal step 1 to the last internal step of the bar.
 -- NUM_STEPS grid steps × STEP_SCALE = total internal steps per bar.
-sequence:setLoops(1, NUM_STEPS * STEP_SCALE-5, 1)
+--sequence:setLoops(1, NUM_STEPS * STEP_SCALE-5, 1)
+sequence:setLoops(1, NUM_STEPS * STEP_SCALE, 0)
 -- sequence:play() is NOT called here; B button starts playback
 
 -- ============================================================
@@ -1551,7 +1552,10 @@ end
 
 
 local function onBarFinish(seq)
+	-- Temporarily defeated - sequence:play(callback) is not frame-accurate
+
     if not isRunning then return end
+	
 
     if performanceMode and perfPendingChainIdx ~= nil then
         saveCurrentPatternFromTracks()
@@ -1572,14 +1576,17 @@ local function onBarFinish(seq)
         chainList      = chains[currentChainIndex]
     end
 
-    loadPatternIntoSequence(currentPattern)
+	loadPatternIntoSequence(currentPattern)
+
     seq:goToStep(1)
     seq:play(onBarFinish)
+
     if performanceMode then
         drawPerformanceMode()
     else
         drawGrid()
     end
+	
 end
 -- Switch performance chain immediately (start from step 1)
 local function perfSwitchChain(chainIdx)
@@ -1597,7 +1604,8 @@ local function perfSwitchChain(chainIdx)
 		if not isRunning then
 			isRunning = true		
 		end
-		sequence:play(onBarFinish)
+		sequence:play()
+		--sequence:play(onBarFinish)
 	end
 	
 
@@ -1885,7 +1893,8 @@ local function perfBUp()
 		if isRunning then
 			updatePOSyncTrack()
 			updateMetronomeTrack()
-			sequence:play(onBarFinish)
+			--sequence:play(onBarFinish)
+			sequence:play()
 		else
 			sequence:stop()
 			perfPendingChainIdx = nil
@@ -1947,22 +1956,34 @@ function playdate.update()
 	end
 
 
-	-- if isRunning and step == NUM_STEPS and lastStepForChain == NUM_STEPS - 1 then
-	-- 	if performanceMode and perfPendingChainIdx ~= nil then
-	-- 		currentChainIndex   = perfPendingChainIdx
-	-- 		chainList           = chains[currentChainIndex]
-	-- 		chainStep           = 1
-	-- 		perfPendingChainIdx = nil
-	-- 		nextPattern         = chainList[1]
-	-- 	elseif chainEnabled and #chainList > 1 then
-	-- 		chainStep   = chainStep % #chainList + 1
-	-- 		nextPattern = chainList[chainStep]
-	-- 	end
-	-- 	chainList = chains[currentChainIndex]   -- re-point alias defensively
-	-- 	drawGrid()
-	-- end
+	if isRunning and step == NUM_STEPS and lastStepForChain == NUM_STEPS - 1 then
+		if performanceMode and perfPendingChainIdx ~= nil then
+			currentChainIndex   = perfPendingChainIdx
+			chainList           = chains[currentChainIndex]
+			chainStep           = 1
+			perfPendingChainIdx = nil
+			nextPattern         = chainList[1]
+		elseif chainEnabled and #chainList > 1 then
+			chainStep   = chainStep % #chainList + 1
+			nextPattern = chainList[chainStep]
+		end
+		chainList = chains[currentChainIndex]   -- re-point alias defensively
+		drawGrid()
+	end
+
 	
 	lastStepForChain = step
+
+	if step==1 and nextPattern~=nil then
+		if not performanceMode then
+			saveCurrentPatternFromTracks()
+		end
+		currentPattern = nextPattern
+		loadPatternIntoSequence(currentPattern)
+		cutActiveVoices()
+		
+		nextPattern=nil
+	end
 
 	perfCurrentStep = step
 	prevRawStep = rawStep
@@ -2128,7 +2149,8 @@ local function patternModeA()
 			sequence:goToStep(1)
 			if not isRunning then
 				isRunning = true
-				sequence:play(onBarFinish)
+				sequence:play()
+				--sequence:play(onBarFinish)
 			end
 			bUsedToExitPtn = true
 			uiMode = "grid"
@@ -2563,7 +2585,8 @@ function playdate.BButtonUp()
 			if isRunning then
 				updatePOSyncTrack()
 				updateMetronomeTrack()
-				sequence:play(onBarFinish)
+				sequence:play()
+				--sequence:play(onBarFinish)
 			else
 				sequence:stop()
 			end
