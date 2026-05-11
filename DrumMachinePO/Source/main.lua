@@ -397,6 +397,8 @@ local activeSequenceSlot = 1
 local slotPatterns = { 1, 1 }
 local slotChainSteps = { 1, 1 }
 local slotChainIndices = { 1, 1 }
+local slotNeedsStep16Restore = { false, false }
+local prepareNextPatternBuffer
 
 local function updateTrack(t, notes, logicalNotes, slot)
 	local list = {}
@@ -443,7 +445,7 @@ end
 
 edgeNextPattern = nil
 
-local function loadPatternIntoSequence(patIdx, slot)
+local function loadPatternIntoSequence(patIdx, slot, omitGridStep)
 	--dest = patIdx
 	-- if currentPattern~=prevPattern and patIdx==currentPattern then
 	-- 	print("Pattern edge:",prevPattern,"->",currentPattern)
@@ -458,7 +460,7 @@ local function loadPatternIntoSequence(patIdx, slot)
 		local pnotes = patterns[patIdx][ti].notes
 		local copy = {}
 		for s = 1, NUM_STEPS do
-			copy[s] = pnotes[s]
+			copy[s] = (s == omitGridStep) and 0 or pnotes[s]
 		end
 		updateTrack(tracks[ti], copy, nil, slot)
 	end
@@ -468,6 +470,8 @@ local function loadPatternIntoBothSequenceSlots(patIdx, chainIdx, chainStepIdx)
 	activeSequenceSlot = 1
 	loadPatternIntoSequence(patIdx, 1)
 	loadPatternIntoSequence(patIdx, 2)
+	slotNeedsStep16Restore[1] = false
+	slotNeedsStep16Restore[2] = false
 	slotChainIndices[1] = chainIdx or currentChainIndex
 	slotChainIndices[2] = chainIdx or currentChainIndex
 	slotChainSteps[1] = chainStepIdx or chainStep
@@ -490,7 +494,16 @@ local function switchToChain(idx)
 	chainStep         = 1
 	if chainEnabled and #chainList > 0 then
 		currentPattern = chainList[1]
-		loadPatternIntoSequence(currentPattern)
+		if isRunning then
+			sequence:stop()
+			cutActiveVoices()
+			loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
+			prepareNextPatternBuffer()
+			sequence:goToStep(1)
+			sequence:play()
+		else
+			loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
+		end
 	end
 end
 
@@ -1568,7 +1581,6 @@ local perfLastBTapMs = 0
 local perfHeldDirCrankUsed = false  -- true if crank fired while a dir was held
 
 local perfCurrentStep = 1
-local prepareNextPatternBuffer
 
 -- ---- Helpers ------------------------------------------------
 
@@ -1711,7 +1723,8 @@ prepareNextPatternBuffer = function()
 	end
 
 	local inactiveSlot = 3 - activeSequenceSlot
-	loadPatternIntoSequence(targetPattern, inactiveSlot)
+	loadPatternIntoSequence(targetPattern, inactiveSlot, NUM_STEPS)
+	slotNeedsStep16Restore[inactiveSlot] = true
 	slotChainIndices[inactiveSlot] = targetChainIndex
 	slotChainSteps[inactiveSlot] = targetChainStep
 	return targetPattern ~= currentPattern
@@ -1811,8 +1824,6 @@ drawPerformanceMode = function()
 end
 
 -- ---- Input handlers -----------------------------------------
-
-
 
 local function perfUpDown()
 	perfStatus.held.up   = true
@@ -2064,6 +2075,14 @@ function playdate.update()
 		loadPatternIntoLogicalTracks(currentPattern)
 		if prepareNextPatternBuffer() then
 			if performanceMode then drawPerformanceMode() else drawGrid() end
+		end
+	end
+
+	if isRunning and slotNeedsStep16Restore[activeSequenceSlot] then
+		local step1End = toInternalStep(1) + STEP_SCALE - 3
+		if rawStepInBar > step1End then
+			loadPatternIntoSequence(currentPattern, activeSequenceSlot)
+			slotNeedsStep16Restore[activeSequenceSlot] = false
 		end
 	end
 
