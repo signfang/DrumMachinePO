@@ -460,7 +460,8 @@ local function loadPatternIntoSequence(patIdx, slot, omitGridStep)
 		local pnotes = patterns[patIdx][ti].notes
 		local copy = {}
 		for s = 1, NUM_STEPS do
-			copy[s] = (s == omitGridStep) and 0 or pnotes[s]
+			--copy[s] = (s == omitGridStep) and 0 or pnotes[s]
+			copy[s] = pnotes[s]
 		end
 		updateTrack(tracks[ti], copy, nil, slot)
 	end
@@ -1625,43 +1626,7 @@ local function perfApplyFxCrank(dir)
 end
 
 
-local function onBarFinish(seq)
-	-- Temporarily defeated - sequence:play(callback) is not frame-accurate
 
-    if not isRunning then return end
-	
-
-    if performanceMode and perfPendingChainIdx ~= nil then
-        saveCurrentPatternFromTracks()
-        currentChainIndex   = perfPendingChainIdx
-        chainList           = chains[currentChainIndex]
-        chainStep           = 1
-        perfPendingChainIdx = nil
-        currentPattern      = chainList[1]
-    elseif crankQueuedPattern ~= nil then
-        saveCurrentPatternFromTracks()
-        currentPattern     = crankQueuedPattern
-        crankQueuedPattern = nil
-        crankShadowSlot    = nil
-    elseif chainEnabled and #chainList > 1 then
-        saveCurrentPatternFromTracks()
-        chainStep      = chainStep % #chainList + 1
-        currentPattern = chainList[chainStep]
-        chainList      = chains[currentChainIndex]
-    end
-
-	loadPatternIntoSequence(currentPattern)
-
-    seq:goToStep(1)
-    seq:play(onBarFinish)
-
-    if performanceMode then
-        drawPerformanceMode()
-    else
-        drawGrid()
-    end
-	
-end
 -- Switch performance chain immediately (start from step 1)
 local function perfSwitchChain(chainIdx)
     perfPendingChainIdx = nil
@@ -1681,7 +1646,6 @@ local function perfSwitchChain(chainIdx)
 			isRunning = true		
 		end
 		sequence:play()
-		--sequence:play(onBarFinish)
 	end
 	
 
@@ -1700,6 +1664,7 @@ local function perfQueueChain(chainIdx)
 end
 
 prepareNextPatternBuffer = function()
+	needsRestore = needsRestore ~= false  -- default true
 	local targetPattern = nil
 	local targetChainIndex = currentChainIndex
 	local targetChainStep = chainStep
@@ -1707,7 +1672,7 @@ prepareNextPatternBuffer = function()
 	if performanceMode and perfPendingChainIdx ~= nil then
 		targetChainIndex = perfPendingChainIdx
 		targetChainStep = 1
-		targetPattern = chains[targetChainIndex][targetChainStep]
+		targetPattern = chains[targetChainIndex][targetChainStep]		
 	elseif crankQueuedPattern ~= nil then
 		targetPattern       = crankQueuedPattern
 		crankQueuedPattern  = nil
@@ -1725,7 +1690,7 @@ prepareNextPatternBuffer = function()
 
 	local inactiveSlot = 3 - activeSequenceSlot
 	loadPatternIntoSequence(targetPattern, inactiveSlot, NUM_STEPS)
-	slotNeedsStep16Restore[inactiveSlot] = true
+	slotNeedsStep16Restore[inactiveSlot] = needsRestore
 	slotChainIndices[inactiveSlot] = targetChainIndex
 	slotChainSteps[inactiveSlot] = targetChainStep
 	return targetPattern ~= currentPattern
@@ -2004,7 +1969,6 @@ local function perfBUp()
 			updatePOSyncTrack()
 			updateMetronomeTrack()
 			prepareNextPatternBuffer()
-			--sequence:play(onBarFinish)
 			sequence:play()
 		else
 			sequence:stop()
@@ -2253,7 +2217,6 @@ local function patternModeA()
 			if not isRunning then
 				isRunning = true
 				sequence:play()
-				--sequence:play(onBarFinish)
 			end
 			bUsedToExitPtn = true
 			uiMode = "grid"
@@ -2692,7 +2655,6 @@ function playdate.BButtonUp()
 				updateMetronomeTrack()
 				prepareNextPatternBuffer()
 				sequence:play()
-				--sequence:play(onBarFinish)
 			else
 				sequence:stop()
 			end
