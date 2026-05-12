@@ -1675,6 +1675,7 @@ local function perfSwitchChain(chainIdx)
 	loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
 	prepareNextPatternBuffer()
     sequence:goToStep(1)
+	prevSequenceSlot = 1 
 	if perfAutoplay then
 		if not isRunning then
 			isRunning = true		
@@ -2069,9 +2070,9 @@ function playdate.update()
 		currentChainIndex = slotChainIndices[activeSequenceSlot] or currentChainIndex
 		chainList = chains[currentChainIndex]
 		chainStep = slotChainSteps[activeSequenceSlot] or chainStep
-		if perfPendingChainIdx == currentChainIndex then
+		--if perfPendingChainIdx == currentChainIndex then
 			perfPendingChainIdx = nil
-		end
+		--end
 		loadPatternIntoLogicalTracks(currentPattern)
 		if prepareNextPatternBuffer() then
 			if performanceMode then drawPerformanceMode() else drawGrid() end
