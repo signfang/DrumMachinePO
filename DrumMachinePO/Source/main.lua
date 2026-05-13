@@ -2019,6 +2019,81 @@ local function perfCranked(change, acceleratedChange)
 	drawPerformanceMode()
 end
 
+-- Grid cursor auto-repeat for held D-pad directions.
+local GRID_REPEAT_DELAY_FRAMES = 14
+local GRID_REPEAT_START_INTERVAL = 4
+local GRID_REPEAT_MIN_INTERVAL = 1
+local gridDPadRepeat = {
+	left  = { held=false, frames=0, repeats=0, nextFrame=GRID_REPEAT_DELAY_FRAMES },
+	right = { held=false, frames=0, repeats=0, nextFrame=GRID_REPEAT_DELAY_FRAMES },
+	up    = { held=false, frames=0, repeats=0, nextFrame=GRID_REPEAT_DELAY_FRAMES },
+	down  = { held=false, frames=0, repeats=0, nextFrame=GRID_REPEAT_DELAY_FRAMES },
+}
+
+local function moveGridCursor(dir)
+	if dir == "left" and selectedColumn > 0 then
+		selectedColumn -= 1
+	elseif dir == "right" and selectedColumn < NUM_STEPS then
+		selectedColumn += 1
+	elseif dir == "up" and selectedRow > 1 then
+		selectedRow -= 1
+	elseif dir == "down" and selectedRow < #tracks then
+		selectedRow += 1
+	else
+		return false
+	end
+	return true
+end
+
+local function startGridDPadRepeat(dir)
+	local state = gridDPadRepeat[dir]
+	if not state then return end
+	state.held = true
+	state.frames = 0
+	state.repeats = 0
+	state.nextFrame = GRID_REPEAT_DELAY_FRAMES
+end
+
+local function stopGridDPadRepeat(dir)
+	local state = gridDPadRepeat[dir]
+	if not state then return end
+	state.held = false
+	state.frames = 0
+	state.repeats = 0
+	state.nextFrame = GRID_REPEAT_DELAY_FRAMES
+end
+
+local function resetGridDPadRepeat()
+	for dir, _ in pairs(gridDPadRepeat) do
+		stopGridDPadRepeat(dir)
+	end
+end
+
+local function processGridDPadRepeat()
+	if performanceMode or uiMode ~= "grid" or dialogMessage ~= nil or adjusting then
+		resetGridDPadRepeat()
+		return
+	end
+
+	local redrew = false
+	local dirOrder = { "left", "right", "up", "down" }
+	for _, dir in ipairs(dirOrder) do
+		local state = gridDPadRepeat[dir]
+		if state.held then
+			state.frames += 1
+			if state.frames >= state.nextFrame then
+				if moveGridCursor(dir) then redrew = true end
+				state.repeats += 1
+				local interval = math.max(
+					GRID_REPEAT_MIN_INTERVAL,
+					GRID_REPEAT_START_INTERVAL - math.floor(state.repeats / 4))
+				state.nextFrame = state.frames + interval
+			end
+		end
+	end
+	if redrew then drawGrid() end
+end
+
 -- System menu toggle
 
 
@@ -2043,6 +2118,8 @@ function playdate.update()
 		perfFxIndex = (perfFxIndex % #PERF_FX_NAMES) + 1
 		drawPerformanceMode()
 	end
+
+	processGridDPadRepeat()
 
 	if isRunning and sequenceSlot ~= prevSequenceSlot then
 		saveCurrentPatternFromTracks()
@@ -2349,8 +2426,8 @@ function playdate.leftButtonDown()
 		return
 	
 	-- column 0 = track name selected; left from col 1 enters name column
-	elseif selectedColumn > 0 then
-		selectedColumn = selectedColumn - 1
+	elseif moveGridCursor("left") then
+		startGridDPadRepeat("left")
 		drawGrid()
 	end
 end
@@ -2381,8 +2458,8 @@ function playdate.rightButtonDown()
 			adjusted = true
 		end
 		return
-	elseif selectedColumn < NUM_STEPS then
-		selectedColumn = selectedColumn + 1
+	elseif moveGridCursor("right") then
+		startGridDPadRepeat("right")
 		drawGrid()
 	end
 end
@@ -2414,7 +2491,10 @@ function playdate.upButtonDown()
 	if adjusting then
 		adjustSelectedNote(1)
 	else
-		if selectedRow > 1 then selectedRow = selectedRow - 1; drawGrid() end
+		if moveGridCursor("up") then
+			startGridDPadRepeat("up")
+			drawGrid()
+		end
 	end
 end
 
@@ -2443,7 +2523,10 @@ function playdate.downButtonDown()
 	if adjusting then
 		adjustSelectedNote(-1)
 	else
-		if selectedRow < #tracks then selectedRow = selectedRow + 1; drawGrid() end
+		if moveGridCursor("down") then
+			startGridDPadRepeat("down")
+			drawGrid()
+		end
 	end
 end
 
@@ -2451,18 +2534,22 @@ end
 -- In normal mode these are no-ops; performance mode routes them to perf stubs.
 function playdate.upButtonUp()
 	if performanceMode then perfUpUp(); return end
+	stopGridDPadRepeat("up")
 end
 
 function playdate.downButtonUp()
 	if performanceMode then perfDownUp(); return end
+	stopGridDPadRepeat("down")
 end
 
 function playdate.leftButtonUp()
 	if performanceMode then perfLeftUp(); return end
+	stopGridDPadRepeat("left")
 end
 
 function playdate.rightButtonUp()
 	if performanceMode then perfRightUp(); return end
+	stopGridDPadRepeat("right")
 end
 
 function playdate.AButtonDown()
