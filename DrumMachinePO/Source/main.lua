@@ -400,6 +400,11 @@ local slotChainIndices = { 1, 1 }
 local prevSequenceSlot = 1
 local prepareNextPatternBuffer
 
+local function getCurrentSequenceSlot()
+	local rawStep = sequence:getCurrentStep()
+	return rawStep > BAR_LENGTH and 2 or 1
+end
+
 local function updateTrack(t, notes, logicalNotes, slot)
 	local list = {}
 	for i = 1, #notes do
@@ -511,9 +516,9 @@ local function switchToChain(idx)
 			sequence:stop()
 			cutActiveVoices()
 			loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
-			prepareNextPatternBuffer()
 			sequence:goToStep(1)
 			prevSequenceSlot = 1
+			prepareNextPatternBuffer()
 			sequence:play()
 		else
 			loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
@@ -1651,9 +1656,9 @@ local function perfSwitchChain(chainIdx)
     sequence:stop()
     cutActiveVoices()
 	loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
-	prepareNextPatternBuffer()
     sequence:goToStep(1)
 	prevSequenceSlot = 1
+	prepareNextPatternBuffer()
 	if perfAutoplay then
 		if not isRunning then
 			isRunning = true		
@@ -1700,7 +1705,8 @@ prepareNextPatternBuffer = function()
 		targetPattern = currentPattern
 	end
 
-	local inactiveSlot = 3 - activeSequenceSlot
+	local currentPlaybackSlot = isRunning and getCurrentSequenceSlot() or activeSequenceSlot
+	local inactiveSlot = 3 - currentPlaybackSlot
 	loadPatternIntoSequence(targetPattern, inactiveSlot)
 	slotChainIndices[inactiveSlot] = targetChainIndex
 	slotChainSteps[inactiveSlot] = targetChainStep
@@ -1970,9 +1976,9 @@ local function perfBUp()
 		chainStep      = 1
 		currentPattern = chainList[1]
 		loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
-		prepareNextPatternBuffer()
 		sequence:goToStep(1)
 		prevSequenceSlot = 1
+		prepareNextPatternBuffer()
 		perfPendingChainIdx = nil
 	else
 		-- Start / stop
@@ -2026,7 +2032,7 @@ local laststep = 0
 function playdate.update()
 	
 	local rawStep = sequence:getCurrentStep()
-	local sequenceSlot = rawStep > BAR_LENGTH and 2 or 1
+	local sequenceSlot = getCurrentSequenceSlot()
 	local rawStepInBar = ((rawStep - 1) % BAR_LENGTH) + 1
 	-- Convert internal scaled step back to a 1-based grid column (1..NUM_STEPS).
 	-- math.ceil maps internal steps 1..STEP_SCALE → grid 1, STEP_SCALE+1..2×STEP_SCALE → grid 2, etc.
@@ -2218,9 +2224,9 @@ local function patternModeA()
 			chainStep = 1
 			currentPattern = chainList[1]
 			loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
-			prepareNextPatternBuffer()
 			sequence:goToStep(1)
 			prevSequenceSlot = 1
+			prepareNextPatternBuffer()
 			if not isRunning then
 				isRunning = true
 				sequence:play()
@@ -2582,7 +2588,7 @@ function playdate.AButtonUp()
 		drawGrid()
 		return
 	end
-	print(aLeftCount, aRightCount)
+	--print(aLeftCount, aRightCount)
 	adjusting = false
 	if adjusted then
 		-- A+left/right: counts available for per-note effects (placeholder)
