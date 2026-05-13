@@ -397,7 +397,7 @@ local activeSequenceSlot = 1
 local slotPatterns = { 1, 1 }
 local slotChainSteps = { 1, 1 }
 local slotChainIndices = { 1, 1 }
-local slotNeedsStep16Restore = { false, false }
+local prevSequenceSlot = 1
 local prepareNextPatternBuffer
 
 local function updateTrack(t, notes, logicalNotes, slot)
@@ -445,7 +445,7 @@ end
 
 edgeNextPattern = nil
 
-local function loadPatternIntoSequence(patIdx, slot, omitGridStep)
+local function loadPatternIntoSequence(patIdx, slot)
 	--dest = patIdx
 	-- if currentPattern~=prevPattern and patIdx==currentPattern then
 	-- 	print("Pattern edge:",prevPattern,"->",currentPattern)
@@ -460,7 +460,6 @@ local function loadPatternIntoSequence(patIdx, slot, omitGridStep)
 		local pnotes = patterns[patIdx][ti].notes
 		local copy = {}
 		for s = 1, NUM_STEPS do
-			--copy[s] = (s == omitGridStep) and 0 or pnotes[s]
 			copy[s] = pnotes[s]
 		end
 		updateTrack(tracks[ti], copy, nil, slot)
@@ -471,8 +470,6 @@ local function loadPatternIntoBothSequenceSlots(patIdx, chainIdx, chainStepIdx)
 	activeSequenceSlot = 1
 	loadPatternIntoSequence(patIdx, 1)
 	loadPatternIntoSequence(patIdx, 2)
-	slotNeedsStep16Restore[1] = false
-	slotNeedsStep16Restore[2] = false
 	slotChainIndices[1] = chainIdx or currentChainIndex
 	slotChainIndices[2] = chainIdx or currentChainIndex
 	slotChainSteps[1] = chainStepIdx or chainStep
@@ -480,10 +477,25 @@ local function loadPatternIntoBothSequenceSlots(patIdx, chainIdx, chainStepIdx)
 	loadPatternIntoLogicalTracks(patIdx)
 end
 
+local function refreshLoadedPatternSlots(patIdx)
+	local refreshed = false
+	for slot = 1, SEQUENCE_SLOTS do
+		if slotPatterns[slot] == patIdx then
+			loadPatternIntoSequence(patIdx, slot)
+			refreshed = true
+		end
+	end
+	return refreshed
+end
+
 local function switchToPattern(patIdx)
 	saveCurrentPatternFromTracks()
 	currentPattern = patIdx
-	loadPatternIntoSequence(currentPattern)
+	if not isRunning then
+		loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
+	elseif not refreshLoadedPatternSlots(currentPattern) then
+		loadPatternIntoSequence(currentPattern)
+	end
 end
 
 -- Switch active chain by index. Re-points the chainList alias so all
@@ -501,6 +513,7 @@ local function switchToChain(idx)
 			loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
 			prepareNextPatternBuffer()
 			sequence:goToStep(1)
+			prevSequenceSlot = 1
 			sequence:play()
 		else
 			loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
@@ -1640,7 +1653,7 @@ local function perfSwitchChain(chainIdx)
 	loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
 	prepareNextPatternBuffer()
     sequence:goToStep(1)
-	prevSequenceSlot = 1 
+	prevSequenceSlot = 1
 	if perfAutoplay then
 		if not isRunning then
 			isRunning = true		
@@ -1664,7 +1677,6 @@ local function perfQueueChain(chainIdx)
 end
 
 prepareNextPatternBuffer = function()
-	needsRestore = needsRestore ~= false  -- default true
 	local targetPattern = nil
 	local targetChainIndex = currentChainIndex
 	local targetChainStep = chainStep
@@ -1689,8 +1701,7 @@ prepareNextPatternBuffer = function()
 	end
 
 	local inactiveSlot = 3 - activeSequenceSlot
-	loadPatternIntoSequence(targetPattern, inactiveSlot, NUM_STEPS)
-	slotNeedsStep16Restore[inactiveSlot] = needsRestore
+	loadPatternIntoSequence(targetPattern, inactiveSlot)
 	slotChainIndices[inactiveSlot] = targetChainIndex
 	slotChainSteps[inactiveSlot] = targetChainStep
 	return targetPattern ~= currentPattern
@@ -1961,6 +1972,7 @@ local function perfBUp()
 		loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
 		prepareNextPatternBuffer()
 		sequence:goToStep(1)
+		prevSequenceSlot = 1
 		perfPendingChainIdx = nil
 	else
 		-- Start / stop
@@ -2010,7 +2022,6 @@ end
 -- ============================================================
 
 local laststep = 0
-local prevSequenceSlot = 1
 
 function playdate.update()
 	
@@ -2040,14 +2051,6 @@ function playdate.update()
 		loadPatternIntoLogicalTracks(currentPattern)
 		if prepareNextPatternBuffer() then
 			if performanceMode then drawPerformanceMode() else drawGrid() end
-		end
-	end
-
-	if isRunning and slotNeedsStep16Restore[activeSequenceSlot] then
-		local step1End = toInternalStep(1) + STEP_SCALE - 3
-		if rawStepInBar > step1End then
-			loadPatternIntoSequence(currentPattern, activeSequenceSlot)
-			slotNeedsStep16Restore[activeSequenceSlot] = false
 		end
 	end
 
@@ -2123,7 +2126,8 @@ function playdate.update()
 						end
 					end
 					if targetPat == currentPattern then
-						loadPatternIntoSequence(currentPattern)
+						refreshLoadedPatternSlots(currentPattern)
+						loadPatternIntoLogicalTracks(currentPattern)
 					end
 					showToast("Pattern " .. targetPat .. " cleared")
 				end
@@ -2169,7 +2173,9 @@ local function setTrackNote(track, pos, val)
 	track.notes[pos] = val
 	local ti = trackIndex(track)
 	if ti then patterns[currentPattern][ti].notes[pos] = val end
-	updateTrack(track, track.notes)
+	if not refreshLoadedPatternSlots(currentPattern) then
+		updateTrack(track, track.notes)
+	end
 	drawGrid()
 	-- SDK: instrument:playNote(note, volume, length, when)
 	-- Omitting length and when plays indefinitely until noteOff; that's fine for preview.
@@ -2214,6 +2220,7 @@ local function patternModeA()
 			loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
 			prepareNextPatternBuffer()
 			sequence:goToStep(1)
+			prevSequenceSlot = 1
 			if not isRunning then
 				isRunning = true
 				sequence:play()
@@ -2499,7 +2506,8 @@ function playdate.AButtonUp()
 						end
 					end
 					if dest == currentPattern then
-						loadPatternIntoSequence(currentPattern)
+						refreshLoadedPatternSlots(currentPattern)
+						loadPatternIntoLogicalTracks(currentPattern)
 					end
 					showToast("P" .. src .. " copied to P" .. dest)
 				end
@@ -2641,6 +2649,7 @@ function playdate.BButtonUp()
 		if isDoubleTap then
 			activeSequenceSlot = 1
 			sequence:goToStep(1)
+			prevSequenceSlot = 1
 			if chainEnabled and #chainList > 1 then
 				chainStep = 1
 				currentPattern = chainList[1]
