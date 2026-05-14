@@ -72,6 +72,11 @@ local USER_SAMPLE_EXTS = {".pda"} -- Only supports pda for now
 local USER_SAMPLE_DIR  = "/Shared/DrumMachinePO/Samples/"
 
 local MAX_BANK_SAMPLES = 10
+local LEVEL_INCREMENTS = 9
+local NUM_STEPS        = 16
+local MAX_PATTERNS     = 18
+local SEQUENCE_SLOTS   = MAX_PATTERNS
+local BAR_LENGTH       = NUM_STEPS * STEP_SCALE
 
 -- Scans USER_SAMPLE_DIR for up to MAX_BANK_SAMPLES samples for a given track.
 -- Priority: "KickDrum1.wav" style (name+number) over "Bank1_1.wav" style.
@@ -146,7 +151,7 @@ end
 function newTrack(name, trackIdx)
     local bank  = loadSampleBank(name, trackIdx)
 	local buffers = {}
-	for bi = 1, 2 do
+	for bi = 1, MAX_PATTERNS do
 		local t = snd.track.new()
 		local i = snd.instrument.new()
 		local s = snd.synth.new(bank[1].sample)
@@ -169,13 +174,14 @@ local bUsedToExitPtn = false
 local lastBTapTime = 0
 local DOUBLE_TAP_MS = 300
 local DOUBLE_TAP_A_MS = 200
+local step1GuardedPattern = nil
 
 -- Apply a track's volume/muted state to its synth.
 -- Base synth volume is 0.2; per-track volume scales on top.
 local function applyTrackVolume(tr)
 	local volume = tr.muted and 0 or 0.2 * tr.volume
-	for _, buffer in ipairs(tr.buffers) do
-		buffer.synth:setVolume(volume)
+	for p, buffer in ipairs(tr.buffers) do
+		buffer.synth:setVolume(p == step1GuardedPattern and 0 or volume)
 	end
 	tr.synth:setVolume(volume)
 end
@@ -194,11 +200,6 @@ for ti, name in ipairs(TRACK_NAMES) do
 	tracks[#tracks+1] = newTrack(name, ti)
 end
 
-local LEVEL_INCREMENTS = 9
-local NUM_STEPS        = 16
-local MAX_PATTERNS     = 18
-local SEQUENCE_SLOTS   = 2
-local BAR_LENGTH       = NUM_STEPS * STEP_SCALE
 local DEFAULT_RETRIG = 1
 local DEFAULT_LENGTH_LEVEL = 4
 local RETRIG_VALUES = { 1, 2, 3, 4, 6, 8 }
@@ -221,7 +222,7 @@ local function normalizeLengthLevel(value)
 end
 
 local function toSequencerStep(gridSlot, slot)
-	return (slot - 1) * BAR_LENGTH + toInternalStep(gridSlot)
+	return toInternalStep(gridSlot)
 end
 
 -- ============================================================
@@ -290,17 +291,19 @@ poSyncEnabled     = false   -- declared early; used by applyPanRouting during st
 -- SEQUENCE SETUP
 -- ============================================================
 
-sequence = snd.sequence.new()
+local patternSequences = {}
 
--- Build drum tracks
-for i = 1, #tracks do
-	for _, buffer in ipairs(tracks[i].buffers) do
-		sequence:addTrack(buffer.track)
+for p = 1, MAX_PATTERNS do
+	patternSequences[p] = snd.sequence.new()
+	for i = 1, #tracks do
+		patternSequences[p]:addTrack(tracks[i].buffers[p].track)
 	end
 end
 
+sequence = patternSequences[1]
+
 -- PO sync track
-local poTrack      = snd.track.new()
+local poTracks     = {}
 local poInstrument = snd.instrument.new()
 
 -- PO sync click: sine wave produces a cleaner, more detectable transient
@@ -313,12 +316,16 @@ local clickSynth   = snd.synth.new(clickSample)
 clickSynth:setVolume(1.5)
 --clickSynth:setADSR(0.003, 0.1, 0, 0)
 poInstrument:addVoice(clickSynth)
-poTrack:setInstrument(poInstrument)
-sequence:addTrack(poTrack)
+for p = 1, MAX_PATTERNS do
+	poTracks[p] = snd.track.new()
+	poTracks[p]:setInstrument(poInstrument)
+	patternSequences[p]:addTrack(poTracks[p])
+end
+local poTrack = poTracks[1]
 
 -- Metronome track: quarter-note click on beats 1, 5, 9, 13
 metronomeEnabled = false
-local metroTrack      = snd.track.new()
+local metroTracks     = {}
 local metroInstrument = snd.instrument.new()
 --local metroSynth      = snd.synth.new(clickSample)
 -- metroSynth:setVolume(0.8)
@@ -328,8 +335,12 @@ metroSynth:setADSR(0, 0.05, 0, 0)  -- instant attack, short decay, no sustain
 
 
 metroInstrument:addVoice(metroSynth)
-metroTrack:setInstrument(metroInstrument)
-sequence:addTrack(metroTrack)
+for p = 1, MAX_PATTERNS do
+	metroTracks[p] = snd.track.new()
+	metroTracks[p]:setInstrument(metroInstrument)
+	patternSequences[p]:addTrack(metroTracks[p])
+end
+local metroTrack = metroTracks[1]
 
 local metroChannel = snd.channel.new()
 metroChannel:addSource(metroInstrument)
@@ -364,7 +375,7 @@ local function switchTrackBank(tr, newBankIdx)
 	for bi, buffer in ipairs(tr.buffers) do
 		local newInst = snd.instrument.new()
 		local newSynth = snd.synth.new(entry.sample)
-		newSynth:setVolume(tr.muted and 0 or 0.2 * tr.volume)
+		newSynth:setVolume(bi == step1GuardedPattern and 0 or (tr.muted and 0 or 0.2 * tr.volume))
 		newInst:addVoice(newSynth)
 		buffer.track:setInstrument(newInst)
 		drumChannel:addSource(newInst)
@@ -411,21 +422,19 @@ end
 local function updateMetronomeTrack()
 	applyPanRouting()
 	if not metronomeEnabled then
-		metroTrack:setNotes({})
+		for _, track in ipairs(metroTracks) do track:setNotes({}) end
 		return
 	end
 	local list = {}
-	for slot = 1, SEQUENCE_SLOTS do
-		for step = 1, NUM_STEPS, 4 do  -- quarter notes: steps 1, 5, 9, 13
-			list[#list+1] = {
-				note     = 70,
-				step     = toSequencerStep(step, slot),
-				length   = STEP_SCALE - 3,
-				velocity = 1.0
-			}
-		end
+	for step = 1, NUM_STEPS, 4 do  -- quarter notes: steps 1, 5, 9, 13
+		list[#list+1] = {
+			note     = 70,
+			step     = toSequencerStep(step, 1),
+			length   = STEP_SCALE - 3,
+			velocity = 1.0
+		}
 	end
-	metroTrack:setNotes(list)
+	for _, track in ipairs(metroTracks) do track:setNotes(list) end
 end
 
 
@@ -451,13 +460,13 @@ local slotChainSteps = { 1, 1 }
 local slotChainIndices = { 1, 1 }
 local prevSequenceSlot = 1
 local prepareNextPatternBuffer
+local perfPendingChainIdx
 
 local function getSequencePosition()
 	local rawStep = sequence:getCurrentStep()
-	local loopLength = BAR_LENGTH * SEQUENCE_SLOTS
-	local sequencePos = ((rawStep - 1) % loopLength) + 1
-	local sequenceSlot = sequencePos > BAR_LENGTH and 2 or 1
-	local rawStepInBar = ((sequencePos - 1) % BAR_LENGTH) + 1
+	local sequencePos = ((rawStep - 1) % BAR_LENGTH) + 1
+	local sequenceSlot = activeSequenceSlot
+	local rawStepInBar = sequencePos
 	return rawStep, sequencePos, sequenceSlot, rawStepInBar
 end
 
@@ -509,25 +518,28 @@ end
 
 -- Reapply swing to all tracks (called when swingAmount changes)
 local function applySwingToAllTracks()
-	for ti, tr in ipairs(tracks) do
-		local p1 = patterns[slotPatterns[1]][ti]
-		local p2 = patterns[slotPatterns[2]][ti]
-		ensurePatternTrackModifiers(p1)
-		ensurePatternTrackModifiers(p2)
-		updateTrack(tr, p1.notes, nil, 1, p1.retrig, p1.length)
-		updateTrack(tr, p2.notes, nil, 2, p2.retrig, p2.length)
+	for p = 1, MAX_PATTERNS do
+		for ti, tr in ipairs(tracks) do
+			local pt = patterns[p][ti]
+			ensurePatternTrackModifiers(pt)
+			updateTrack(tr, pt.notes, nil, p, pt.retrig, pt.length)
+		end
 	end
 end
 
+local logicalTracksPattern = 1
+
 local function saveCurrentPatternFromTracks()
+	local targetPattern = logicalTracksPattern or currentPattern
 	for ti = 1, #tracks do
 		for s = 1, NUM_STEPS do
-			patterns[currentPattern][ti].notes[s] = tracks[ti].notes[s]
+			patterns[targetPattern][ti].notes[s] = tracks[ti].notes[s]
 		end
 	end
 end
 
 local function loadPatternIntoLogicalTracks(patIdx)
+	logicalTracksPattern = patIdx
 	for ti, tr in ipairs(tracks) do
 		local ptrack = patterns[patIdx][ti]
 		ensurePatternTrackModifiers(ptrack)
@@ -564,14 +576,58 @@ local function loadPatternIntoSequence(patIdx, slot)
 	end
 end
 
+local function restoreStep1Guard()
+	if step1GuardedPattern ~= nil then
+		for _, tr in ipairs(tracks) do
+			local buffer = tr.buffers[step1GuardedPattern]
+			if buffer then
+				buffer.synth:setVolume(tr.muted and 0 or 0.2 * tr.volume)
+			end
+		end
+		step1GuardedPattern = nil
+	end
+end
+
+local function getUpcomingBoundaryPattern()
+	if performanceMode and perfPendingChainIdx ~= nil then
+		local pendingChain = chains[perfPendingChainIdx]
+		return pendingChain and pendingChain[1] or currentPattern
+	end
+	if chainEnabled and #chainList > 1 then
+		local nextChainStep = chainStep % #chainList + 1
+		return chainList[nextChainStep]
+	end
+	return currentPattern
+end
+
+local function guardCurrentPatternStep1IfNeeded(rawStepInBar)
+	if not isRunning or step1GuardedPattern ~= nil then return end
+	if rawStepInBar < BAR_LENGTH - math.floor(STEP_SCALE / 2) then return end
+
+	local upcomingPattern = getUpcomingBoundaryPattern()
+	if upcomingPattern ~= currentPattern then
+		step1GuardedPattern = currentPattern
+		for _, tr in ipairs(tracks) do
+			local buffer = tr.buffers[currentPattern]
+			if buffer then
+				buffer.synth:setVolume(0)
+			end
+		end
+	end
+end
+
+local function loadAllPatternSequences()
+	restoreStep1Guard()
+	for p = 1, MAX_PATTERNS do
+		loadPatternIntoSequence(p, p)
+	end
+end
+
 local function loadPatternIntoBothSequenceSlots(patIdx, chainIdx, chainStepIdx)
-	activeSequenceSlot = 1
-	loadPatternIntoSequence(patIdx, 1)
-	loadPatternIntoSequence(patIdx, 2)
-	slotChainIndices[1] = chainIdx or currentChainIndex
-	slotChainIndices[2] = chainIdx or currentChainIndex
-	slotChainSteps[1] = chainStepIdx or chainStep
-	slotChainSteps[2] = chainStepIdx or chainStep
+	activeSequenceSlot = patIdx
+	loadPatternIntoSequence(patIdx, patIdx)
+	slotChainIndices[patIdx] = chainIdx or currentChainIndex
+	slotChainSteps[patIdx] = chainStepIdx or chainStep
 	loadPatternIntoLogicalTracks(patIdx)
 end
 
@@ -581,18 +637,37 @@ local function loadChainStartIntoSequenceSlots(chainIdx)
 	chainEnabled = true
 	chainStep = 1
 	currentPattern = chainList[1]
-	activeSequenceSlot = 1
+	activeSequenceSlot = currentPattern
 
-	loadPatternIntoSequence(chainList[1], 1)
-	slotChainIndices[1] = currentChainIndex
-	slotChainSteps[1] = 1
+	loadPatternIntoSequence(chainList[1], chainList[1])
+	slotChainIndices[chainList[1]] = currentChainIndex
+	slotChainSteps[chainList[1]] = 1
 
 	local nextChainStep = (#chainList > 1) and 2 or 1
-	loadPatternIntoSequence(chainList[nextChainStep], 2)
-	slotChainIndices[2] = currentChainIndex
-	slotChainSteps[2] = nextChainStep
+	loadPatternIntoSequence(chainList[nextChainStep], chainList[nextChainStep])
+	slotChainIndices[chainList[nextChainStep]] = currentChainIndex
+	slotChainSteps[chainList[nextChainStep]] = nextChainStep
 
 	loadPatternIntoLogicalTracks(currentPattern)
+end
+
+local function setActivePatternSequence(patIdx)
+	sequence = patternSequences[patIdx]
+	poTrack = poTracks[patIdx]
+	metroTrack = metroTracks[patIdx]
+	activeSequenceSlot = patIdx
+end
+
+local function jumpToPatternSequence(patIdx, shouldPlay)
+	if sequence and sequence:isPlaying() then
+		sequence:stop()
+	end
+	restoreStep1Guard()
+	setActivePatternSequence(patIdx)
+	sequence:goToStep(1)
+	if shouldPlay then
+		sequence:play()
+	end
 end
 
 local function refreshLoadedPatternSlots(patIdx)
@@ -609,10 +684,11 @@ end
 local function switchToPattern(patIdx)
 	saveCurrentPatternFromTracks()
 	currentPattern = patIdx
+	loadPatternIntoSequence(currentPattern, currentPattern)
 	if not isRunning then
 		loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
-	elseif not refreshLoadedPatternSlots(currentPattern) then
-		loadPatternIntoSequence(currentPattern)
+	else
+		jumpToPatternSequence(currentPattern, true)
 	end
 end
 
@@ -626,15 +702,14 @@ local function switchToChain(idx)
 	if chainEnabled and #chainList > 0 then
 		currentPattern = chainList[1]
 		if isRunning then
-			sequence:stop()
 			cutActiveVoices()
 			loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
-			sequence:goToStep(1)
-			prevSequenceSlot = 1
+			jumpToPatternSequence(currentPattern, true)
+			prevSequenceSlot = currentPattern
 			prepareNextPatternBuffer()
-			sequence:play()
 		else
 			loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
+			setActivePatternSequence(currentPattern)
 		end
 	end
 end
@@ -646,7 +721,7 @@ local function updatePOSyncTrack()
 	applyPanRouting()
 
 	if not poSyncEnabled then
-		poTrack:setNotes({})
+		for _, track in ipairs(poTracks) do track:setNotes({}) end
 		return
 	end
 
@@ -655,20 +730,18 @@ local function updatePOSyncTrack()
 	-- at 1/16th note resolution, that means a pulse on steps 1,3,5,7,9,11,13,15.
 	-- syncOffset is in grid-step units; multiply by STEP_SCALE for internal coords.
 	local list = {}
-	for slot = 1, SEQUENCE_SLOTS do
-		for step = 1, NUM_STEPS, 2 do
-			local internalPos = toSequencerStep(step, slot) - math.floor(syncOffset * STEP_SCALE + 0.5)
-			if internalPos >= 1 then
-				list[#list+1] = {
-					note     = 30,
-					step     = internalPos,
-					length   = STEP_SCALE,
-					velocity = 1.0
-				}
-			end
+	for step = 1, NUM_STEPS, 2 do
+		local internalPos = toSequencerStep(step, 1) - math.floor(syncOffset * STEP_SCALE + 0.5)
+		if internalPos >= 1 then
+			list[#list+1] = {
+				note     = 30,
+				step     = internalPos,
+				length   = STEP_SCALE,
+				velocity = 1.0
+			}
 		end
 	end
-	poTrack:setNotes(list)
+	for _, track in ipairs(poTracks) do track:setNotes(list) end
 end
 
 -- ============================================================
@@ -680,21 +753,24 @@ patterns[1][2].notes = { 0,0,0,0,  9,0,0,0,  0,7,0,0,  9,0,0,0 }
 patterns[1][3].notes = { 8,0,5,0,  6,0,5,0,  8,0,5,0,  6,0,5,0 }
 patterns[1][9].notes = { 0,0,0,3,  0,2,0,0,  0,0,0,3,  0,0,0,0 }
 
-loadPatternIntoBothSequenceSlots(1, 1, 1)
+loadAllPatternSequences()
+loadPatternIntoLogicalTracks(1)
+setActivePatternSequence(1)
 
 function setBPM(bpm)
 	bpmValue = bpm
 	local stepsPerSecond = 4 * (bpm / 60) * STEP_SCALE
-	sequence:setTempo(stepsPerSecond)
+	for _, seq in ipairs(patternSequences) do
+		seq:setTempo(stepsPerSecond)
+	end
 	updatePOSyncTrack()
 	updateMetronomeTrack()
 end
 
 setBPM(bpmValue)
--- Loop from internal step 1 to the last internal step of the bar.
--- Two bar-length slots are used as drum-pattern buffers. PO sync and
--- metronome are scheduled across both slots independently.
-sequence:setLoops(1, BAR_LENGTH * SEQUENCE_SLOTS, 0)
+for _, seq in ipairs(patternSequences) do
+	seq:setLoops(1, BAR_LENGTH, 0)
+end
 -- sequence:play() is NOT called here; B button starts playback
 
 -- ============================================================
@@ -1316,7 +1392,9 @@ local function projectFromTable(proj)
 	setBPM(bpmValue)
 	currentPattern = 1
 	chainStep      = 1
-	loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
+	loadAllPatternSequences()
+	loadPatternIntoLogicalTracks(currentPattern)
+	setActivePatternSequence(currentPattern)
 	return true
 end
 
@@ -1733,10 +1811,8 @@ local perfHeldDir  = nil   -- "left"|"up"|"right"|"down" or nil
 
 -- Pending chain switch: set when user presses a dir mid-chain.
 -- Applied at the next bar boundary (step 16→1) in update().
-local perfPendingChainIdx = nil
+perfPendingChainIdx = nil
 local perfPendingPreparedSlot = nil
-local PERF_QUEUE_PRELOAD_START = STEP_SCALE * 2
-local PERF_QUEUE_PRELOAD_END = BAR_LENGTH - STEP_SCALE * 3
 
 -- Crank accumulator (reused from grid mode pattern)
 local perfCrankAccum = 0
@@ -1836,15 +1912,13 @@ local function perfSwitchChain(chainIdx)
     chainEnabled        = true
     chainStep           = 1
     currentPattern      = chainList[1]
-    sequence:stop()
     cutActiveVoices()
 	loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
-    sequence:goToStep(1)
-	prevSequenceSlot = 1
+	jumpToPatternSequence(currentPattern, isRunning or perfAutoplay)
+	prevSequenceSlot = currentPattern
 	prepareNextPatternBuffer()
 	if isRunning or perfAutoplay then
 		isRunning = true
-		sequence:play()
 	end
 	
 
@@ -1854,29 +1928,10 @@ end
 -- If perfAutoplay is true, treat as immediate switch instead.
 local function perfQueueChain(chainIdx)
 
-	local oldPreparedSlot = perfPendingPreparedSlot
 	perfPendingChainIdx = chainIdx
 	perfPendingPreparedSlot = nil
-	if isRunning and oldPreparedSlot ~= nil then
-		clearDrumSequenceSlot(oldPreparedSlot)
-	end
 	drawPerformanceMode()
 
-end
-
-local function preparePendingPerformanceQueue(rawStepInBar)
-	if not (isRunning and performanceMode and perfPendingChainIdx ~= nil) then return end
-	if perfPendingPreparedSlot ~= nil then return end
-	if rawStepInBar <= PERF_QUEUE_PRELOAD_START or rawStepInBar >= PERF_QUEUE_PRELOAD_END then return end
-
-	local currentPlaybackSlot = getCurrentSequenceSlot()
-	local inactiveSlot = 3 - currentPlaybackSlot
-	local pendingChain = chains[perfPendingChainIdx]
-	local targetPattern = pendingChain and pendingChain[1] or currentPattern
-	loadPatternIntoSequence(targetPattern, inactiveSlot)
-	slotChainIndices[inactiveSlot] = perfPendingChainIdx
-	slotChainSteps[inactiveSlot] = 1
-	perfPendingPreparedSlot = inactiveSlot
 end
 
 prepareNextPatternBuffer = function()
@@ -1904,9 +1959,7 @@ prepareNextPatternBuffer = function()
 		targetPattern = currentPattern
 	end
 
-	local currentPlaybackSlot = isRunning and getCurrentSequenceSlot() or activeSequenceSlot
-	local inactiveSlot = 3 - currentPlaybackSlot
-	loadPatternIntoSequence(targetPattern, inactiveSlot)
+	local inactiveSlot = targetPattern
 	slotChainIndices[inactiveSlot] = targetChainIndex
 	slotChainSteps[inactiveSlot] = targetChainStep
 	if usingPerfPending then
@@ -2174,12 +2227,11 @@ local function perfBUp()
 	perfLastBTapMs = now
 	if isDouble then
 		-- Rewind to start of current chain
-		sequence:stop()
 		chainStep      = 1
 		currentPattern = chainList[1]
 		loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
-		sequence:goToStep(1)
-		prevSequenceSlot = 1
+		jumpToPatternSequence(currentPattern, false)
+		prevSequenceSlot = currentPattern
 		prepareNextPatternBuffer()
 		perfPendingChainIdx = nil
 		perfPendingPreparedSlot = nil
@@ -2190,9 +2242,13 @@ local function perfBUp()
 			updatePOSyncTrack()
 			updateMetronomeTrack()
 			prepareNextPatternBuffer()
+			restoreStep1Guard()
+			setActivePatternSequence(currentPattern)
+			sequence:goToStep(1)
 			sequence:play()
 		else
 			sequence:stop()
+			restoreStep1Guard()
 			perfPendingChainIdx = nil
 			perfPendingPreparedSlot = nil
 		end
@@ -2308,6 +2364,7 @@ end
 
 local laststep = 0
 local nextBufferNeedsPrepare = false
+local prevRawStepInBar = 1
 
 function playdate.update()
 	
@@ -2331,48 +2388,52 @@ function playdate.update()
 		end
 	end
 
-	if isRunning and not sequence:isPlaying() then
-		sequence:play()
-	end
+	guardCurrentPatternStep1IfNeeded(rawStepInBar)
 
-	preparePendingPerformanceQueue(rawStepInBar)
-
-	if isRunning and sequenceSlot ~= prevSequenceSlot then
+	local crossedBarBoundary = isRunning and rawStepInBar < prevRawStepInBar
+	if crossedBarBoundary then
 		if performanceMode and perfPendingChainIdx ~= nil then
 			saveCurrentPatternFromTracks()
-			if perfPendingPreparedSlot == sequenceSlot then
-				activeSequenceSlot = sequenceSlot
-				currentChainIndex = perfPendingChainIdx
-				chainList = chains[currentChainIndex]
-				chainEnabled = true
-				chainStep = slotChainSteps[activeSequenceSlot] or 1
-				currentPattern = slotPatterns[activeSequenceSlot] or chainList[chainStep]
-				loadPatternIntoLogicalTracks(currentPattern)
-				perfPendingChainIdx = nil
-				perfPendingPreparedSlot = nil
-				nextBufferNeedsPrepare = true
+			cutActiveVoices()
+			local oldPattern = currentPattern
+			currentChainIndex = perfPendingChainIdx
+			chainList = chains[currentChainIndex]
+			chainEnabled = true
+			chainStep = 1
+			currentPattern = chainList[1]
+			loadPatternIntoLogicalTracks(currentPattern)
+			if currentPattern ~= oldPattern then
+				jumpToPatternSequence(currentPattern, true)
 			else
-				sequence:stop()
-				cutActiveVoices()
-				loadChainStartIntoSequenceSlots(perfPendingChainIdx)
-				sequence:goToStep(1)
-				prevSequenceSlot = 1
-				sequenceSlot = 1
-				rawStepInBar = 1
-				step = 1
-				perfPendingChainIdx = nil
-				perfPendingPreparedSlot = nil
-				nextBufferNeedsPrepare = false
-				sequence:play()
+				restoreStep1Guard()
+				setActivePatternSequence(currentPattern)
 			end
+			prevSequenceSlot = currentPattern
+			sequenceSlot = currentPattern
+			rawStepInBar = 1
+			step = 1
+			perfPendingChainIdx = nil
+			perfPendingPreparedSlot = nil
+			nextBufferNeedsPrepare = false
 			if performanceMode then drawPerformanceMode() else drawGrid() end
 		else
 			saveCurrentPatternFromTracks()
-			activeSequenceSlot = sequenceSlot
-			currentPattern = slotPatterns[activeSequenceSlot]
-			currentChainIndex = slotChainIndices[activeSequenceSlot] or currentChainIndex
+			local oldPattern = currentPattern
+			if chainEnabled and #chainList > 1 then
+				chainStep = chainStep % #chainList + 1
+				currentPattern = chainList[chainStep]
+				if currentPattern ~= oldPattern then
+					jumpToPatternSequence(currentPattern, true)
+				else
+					restoreStep1Guard()
+					setActivePatternSequence(currentPattern)
+				end
+			else
+				restoreStep1Guard()
+				setActivePatternSequence(currentPattern)
+			end
+			currentChainIndex = currentChainIndex
 			chainList = chains[currentChainIndex]
-			chainStep = slotChainSteps[activeSequenceSlot] or chainStep
 			if perfPendingPreparedSlot == activeSequenceSlot then
 				perfPendingChainIdx = nil
 				perfPendingPreparedSlot = nil
@@ -2380,6 +2441,8 @@ function playdate.update()
 			loadPatternIntoLogicalTracks(currentPattern)
 			nextBufferNeedsPrepare = true
 		end
+		rawStepInBar = 1
+		step = 1
 	end
 
 	local canPrepareBuffer = rawStepInBar > STEP_SCALE * 2
@@ -2395,6 +2458,7 @@ function playdate.update()
 
 	perfCurrentStep = step
 	prevSequenceSlot = sequenceSlot
+	prevRawStepInBar = rawStepInBar
 	if performanceMode then
 		-- Performance mode: blit the static performance screen every frame.
 		-- The sequencer keeps running (chain logic above still executes).
@@ -2632,8 +2696,8 @@ local function patternModeA()
 			chainStep = 1
 			currentPattern = chainList[1]
 			loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
-			sequence:goToStep(1)
-			prevSequenceSlot = 1
+			jumpToPatternSequence(currentPattern, isRunning)
+			prevSequenceSlot = currentPattern
 			prepareNextPatternBuffer()
 			if not isRunning then
 				isRunning = true
@@ -2990,7 +3054,9 @@ function playdate.AButtonUp()
 					end
 					setBPM(120)
 					currentPattern = 1
-					loadPatternIntoBothSequenceSlots(1, currentChainIndex, chainStep)
+					loadAllPatternSequences()
+					loadPatternIntoLogicalTracks(1)
+					setActivePatternSequence(1)
 					showToast("Defaults restored")
 				end
 				drawGrid()
@@ -3072,15 +3138,14 @@ function playdate.BButtonUp()
 		lastBTapTime = now
 
 		if isDoubleTap then
-			activeSequenceSlot = 1
-			sequence:goToStep(1)
-			prevSequenceSlot = 1
 			if chainEnabled and #chainList > 1 then
 				chainStep = 1
 				currentPattern = chainList[1]
 				loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
 				prepareNextPatternBuffer()
 			end
+			jumpToPatternSequence(currentPattern, false)
+			prevSequenceSlot = currentPattern
 			drawGrid()
 		else
 			isRunning = not isRunning
@@ -3088,16 +3153,20 @@ function playdate.BButtonUp()
 				updatePOSyncTrack()
 				updateMetronomeTrack()
 				prepareNextPatternBuffer()
+				restoreStep1Guard()
+				setActivePatternSequence(currentPattern)
+				sequence:goToStep(1)
 				sequence:play()
 			else
 				sequence:stop()
+				restoreStep1Guard()
 			end
 			if crankQueuedPattern ~= nil then
 				currentPattern     = crankQueuedPattern
 				crankQueuedPattern = nil
 				crankShadowSlot    = nil
-				loadPatternIntoSequence(currentPattern, activeSequenceSlot)
-				loadPatternIntoSequence(currentPattern, 3 - activeSequenceSlot)
+				loadPatternIntoSequence(currentPattern, currentPattern)
+				setActivePatternSequence(currentPattern)
 			end
 		end
 	end
