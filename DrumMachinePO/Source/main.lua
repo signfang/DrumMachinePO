@@ -431,6 +431,13 @@ local function updateTrack(t, notes, logicalNotes, slot)
 		t.notes = logicalNotes or notes   -- notes[] always holds integer velocities, never play positions
 	end
 end
+
+local function clearDrumSequenceSlot(slot)
+	for _, tr in ipairs(tracks) do
+		tr.buffers[slot].track:setNotes({})
+	end
+end
+
 -- Reapply swing to all tracks (called when swingAmount changes)
 local function applySwingToAllTracks()
 	for ti, tr in ipairs(tracks) do
@@ -1704,6 +1711,9 @@ local function perfQueueChain(chainIdx)
 
 	perfPendingChainIdx = chainIdx
 	perfPendingPreparedSlot = nil
+	if isRunning then
+		clearDrumSequenceSlot(3 - getCurrentSequenceSlot())
+	end
 	drawPerformanceMode()
 
 end
@@ -2165,6 +2175,9 @@ function playdate.update()
 			loadChainStartIntoSequenceSlots(perfPendingChainIdx)
 			sequence:goToStep(1)
 			prevSequenceSlot = 1
+			sequenceSlot = 1
+			rawStepInBar = 1
+			step = 1
 			perfPendingChainIdx = nil
 			perfPendingPreparedSlot = nil
 			nextBufferNeedsPrepare = false
