@@ -449,8 +449,10 @@ local activeSequenceSlot = 1
 local slotPatterns = { 1, 1 }
 local slotChainSteps = { 1, 1 }
 local slotChainIndices = { 1, 1 }
+local slotNeedsFullReload = { nil, nil }
 local prevSequenceSlot = 1
 local prepareNextPatternBuffer
+local PRELOAD_START_STEP = STEP_SCALE * 4
 
 local function getSequencePosition()
 	local rawStep = sequence:getCurrentStep()
@@ -541,7 +543,7 @@ end
 
 edgeNextPattern = nil
 
-local function loadPatternIntoSequence(patIdx, slot)
+local function loadPatternIntoSequence(patIdx, slot, maxGridStep)
 	--dest = patIdx
 	-- if currentPattern~=prevPattern and patIdx==currentPattern then
 	-- 	print("Pattern edge:",prevPattern,"->",currentPattern)
@@ -551,6 +553,7 @@ local function loadPatternIntoSequence(patIdx, slot)
 	
 	slot = slot or activeSequenceSlot
 	slotPatterns[slot] = patIdx
+	slotNeedsFullReload[slot] = maxGridStep and patIdx or nil
 
 	for ti = 1, #tracks do
 		local ptrack = patterns[patIdx][ti]
@@ -558,10 +561,17 @@ local function loadPatternIntoSequence(patIdx, slot)
 		local pnotes = ptrack.notes
 		local copy = {}
 		for s = 1, NUM_STEPS do
-			copy[s] = pnotes[s]
+			copy[s] = (maxGridStep and s > maxGridStep) and 0 or pnotes[s]
 		end
 		updateTrack(tracks[ti], copy, nil, slot, ptrack.retrig, ptrack.length)
 	end
+end
+
+local function restoreActiveSlotFullPatternIfNeeded(rawStepInBar)
+	local patIdx = slotNeedsFullReload[activeSequenceSlot]
+	if patIdx == nil then return end
+	if rawStepInBar <= STEP_SCALE * 12 then return end
+	loadPatternIntoSequence(patIdx, activeSequenceSlot)
 end
 
 local function loadPatternIntoBothSequenceSlots(patIdx, chainIdx, chainStepIdx)
@@ -1735,7 +1745,8 @@ local perfHeldDir  = nil   -- "left"|"up"|"right"|"down" or nil
 -- Applied at the next bar boundary (step 16→1) in update().
 local perfPendingChainIdx = nil
 local perfPendingPreparedSlot = nil
-local PERF_QUEUE_PRELOAD_START = STEP_SCALE * 2
+local perfPendingPreparedChainIdx = nil
+local PERF_QUEUE_PRELOAD_START = PRELOAD_START_STEP
 local PERF_QUEUE_PRELOAD_END = BAR_LENGTH - STEP_SCALE * 3
 
 -- Crank accumulator (reused from grid mode pattern)
@@ -1831,6 +1842,7 @@ end
 local function perfSwitchChain(chainIdx)
     perfPendingChainIdx = nil
     perfPendingPreparedSlot = nil
+    perfPendingPreparedChainIdx = nil
     currentChainIndex   = chainIdx
     chainList           = chains[chainIdx]
     chainEnabled        = true
@@ -1854,12 +1866,9 @@ end
 -- If perfAutoplay is true, treat as immediate switch instead.
 local function perfQueueChain(chainIdx)
 
-	local oldPreparedSlot = perfPendingPreparedSlot
 	perfPendingChainIdx = chainIdx
 	perfPendingPreparedSlot = nil
-	if isRunning and oldPreparedSlot ~= nil then
-		clearDrumSequenceSlot(oldPreparedSlot)
-	end
+	perfPendingPreparedChainIdx = nil
 	drawPerformanceMode()
 
 end
@@ -1873,17 +1882,18 @@ local function preparePendingPerformanceQueue(rawStepInBar)
 	local inactiveSlot = 3 - currentPlaybackSlot
 	local pendingChain = chains[perfPendingChainIdx]
 	local targetPattern = pendingChain and pendingChain[1] or currentPattern
-	loadPatternIntoSequence(targetPattern, inactiveSlot)
+	loadPatternIntoSequence(targetPattern, inactiveSlot, NUM_STEPS - 1)
 	slotChainIndices[inactiveSlot] = perfPendingChainIdx
 	slotChainSteps[inactiveSlot] = 1
 	perfPendingPreparedSlot = inactiveSlot
+	perfPendingPreparedChainIdx = perfPendingChainIdx
 end
 
-prepareNextPatternBuffer = function()
+prepareNextPatternBuffer = function(ignorePerfPending)
 	local targetPattern = nil
 	local targetChainIndex = currentChainIndex
 	local targetChainStep = chainStep
-	local usingPerfPending = performanceMode and perfPendingChainIdx ~= nil
+	local usingPerfPending = (not ignorePerfPending) and performanceMode and perfPendingChainIdx ~= nil
 
 	if usingPerfPending then
 		targetChainIndex = perfPendingChainIdx
@@ -1906,11 +1916,12 @@ prepareNextPatternBuffer = function()
 
 	local currentPlaybackSlot = isRunning and getCurrentSequenceSlot() or activeSequenceSlot
 	local inactiveSlot = 3 - currentPlaybackSlot
-	loadPatternIntoSequence(targetPattern, inactiveSlot)
+	loadPatternIntoSequence(targetPattern, inactiveSlot, isRunning and (NUM_STEPS - 1) or nil)
 	slotChainIndices[inactiveSlot] = targetChainIndex
 	slotChainSteps[inactiveSlot] = targetChainStep
 	if usingPerfPending then
 		perfPendingPreparedSlot = inactiveSlot
+		perfPendingPreparedChainIdx = perfPendingChainIdx
 	end
 	return targetPattern ~= currentPattern
 end
@@ -2183,6 +2194,7 @@ local function perfBUp()
 		prepareNextPatternBuffer()
 		perfPendingChainIdx = nil
 		perfPendingPreparedSlot = nil
+		perfPendingPreparedChainIdx = nil
 	else
 		-- Start / stop
 		isRunning = not isRunning
@@ -2195,6 +2207,7 @@ local function perfBUp()
 			sequence:stop()
 			perfPendingChainIdx = nil
 			perfPendingPreparedSlot = nil
+			perfPendingPreparedChainIdx = nil
 		end
 	end
 	drawPerformanceMode()
@@ -2340,7 +2353,7 @@ function playdate.update()
 	if isRunning and sequenceSlot ~= prevSequenceSlot then
 		if performanceMode and perfPendingChainIdx ~= nil then
 			saveCurrentPatternFromTracks()
-			if perfPendingPreparedSlot == sequenceSlot then
+			if perfPendingPreparedSlot == sequenceSlot and perfPendingPreparedChainIdx == perfPendingChainIdx then
 				activeSequenceSlot = sequenceSlot
 				currentChainIndex = perfPendingChainIdx
 				chainList = chains[currentChainIndex]
@@ -2350,20 +2363,18 @@ function playdate.update()
 				loadPatternIntoLogicalTracks(currentPattern)
 				perfPendingChainIdx = nil
 				perfPendingPreparedSlot = nil
+				perfPendingPreparedChainIdx = nil
 				nextBufferNeedsPrepare = true
 			else
-				sequence:stop()
-				cutActiveVoices()
-				loadChainStartIntoSequenceSlots(perfPendingChainIdx)
-				sequence:goToStep(1)
-				prevSequenceSlot = 1
-				sequenceSlot = 1
-				rawStepInBar = 1
-				step = 1
-				perfPendingChainIdx = nil
+				activeSequenceSlot = sequenceSlot
+				currentPattern = slotPatterns[activeSequenceSlot]
+				currentChainIndex = slotChainIndices[activeSequenceSlot] or currentChainIndex
+				chainList = chains[currentChainIndex]
+				chainStep = slotChainSteps[activeSequenceSlot] or chainStep
 				perfPendingPreparedSlot = nil
-				nextBufferNeedsPrepare = false
-				sequence:play()
+				perfPendingPreparedChainIdx = nil
+				loadPatternIntoLogicalTracks(currentPattern)
+				nextBufferNeedsPrepare = true
 			end
 			if performanceMode then drawPerformanceMode() else drawGrid() end
 		else
@@ -2376,18 +2387,22 @@ function playdate.update()
 			if perfPendingPreparedSlot == activeSequenceSlot then
 				perfPendingChainIdx = nil
 				perfPendingPreparedSlot = nil
+				perfPendingPreparedChainIdx = nil
 			end
 			loadPatternIntoLogicalTracks(currentPattern)
 			nextBufferNeedsPrepare = true
 		end
 	end
 
-	local canPrepareBuffer = rawStepInBar > STEP_SCALE * 2
+	restoreActiveSlotFullPatternIfNeeded(rawStepInBar)
+
+	local canPrepareBuffer = rawStepInBar > PRELOAD_START_STEP
 		and rawStepInBar <= BAR_LENGTH - STEP_SCALE
 	if isRunning and canPrepareBuffer
 	   and nextBufferNeedsPrepare
-	   and perfPendingChainIdx == nil then
-		if prepareNextPatternBuffer() then
+	   and (perfPendingChainIdx == nil or perfPendingPreparedSlot == nil) then
+		local ignorePerfPending = perfPendingChainIdx ~= nil
+		if prepareNextPatternBuffer(ignorePerfPending) then
 			if performanceMode then drawPerformanceMode() else drawGrid() end
 		end
 		nextBufferNeedsPrepare = false
@@ -3214,6 +3229,7 @@ menu:addMenuItem("Performance", function()
 		perfHeldDir         = nil
 		perfPendingChainIdx = nil
 		perfPendingPreparedSlot = nil
+		perfPendingPreparedChainIdx = nil
 		perfCrankAccum      = 0
 		perfFxIndex         = 1
 		perfFxDir           = 1
