@@ -203,6 +203,23 @@ local DEFAULT_RETRIG = 1
 local DEFAULT_LENGTH_LEVEL = 4
 local RETRIG_VALUES = { 1, 2, 3, 4, 6, 8 }
 
+local function isValidRetrig(value)
+	for _, v in ipairs(RETRIG_VALUES) do
+		if v == value then return true end
+	end
+	return false
+end
+
+local function normalizeRetrig(value)
+	value = tonumber(value) or DEFAULT_RETRIG
+	return isValidRetrig(value) and value or DEFAULT_RETRIG
+end
+
+local function normalizeLengthLevel(value)
+	value = tonumber(value) or DEFAULT_LENGTH_LEVEL
+	return math.max(1, math.min(5, math.floor(value)))
+end
+
 local function toSequencerStep(gridSlot, slot)
 	return (slot - 1) * BAR_LENGTH + toInternalStep(gridSlot)
 end
@@ -221,8 +238,8 @@ local function ensurePatternTrackModifiers(pt)
 	pt.retrig = pt.retrig or makeDefaultStepArray(DEFAULT_RETRIG)
 	pt.length = pt.length or makeDefaultStepArray(DEFAULT_LENGTH_LEVEL)
 	for s = 1, NUM_STEPS do
-		pt.retrig[s] = pt.retrig[s] or DEFAULT_RETRIG
-		pt.length[s] = pt.length[s] or DEFAULT_LENGTH_LEVEL
+		pt.retrig[s] = normalizeRetrig(pt.retrig[s])
+		pt.length[s] = normalizeLengthLevel(pt.length[s])
 	end
 end
 
@@ -234,8 +251,8 @@ end
 local function copyPatternTrack(src, dest)
 	for s = 1, NUM_STEPS do
 		dest.notes[s] = src.notes[s]
-		dest.retrig[s] = src.retrig[s] or DEFAULT_RETRIG
-		dest.length[s] = src.length[s] or DEFAULT_LENGTH_LEVEL
+		dest.retrig[s] = normalizeRetrig(src.retrig[s])
+		dest.length[s] = normalizeLengthLevel(src.length[s])
 	end
 end
 
@@ -1173,10 +1190,10 @@ function drawGrid()
 			local pt = patterns[currentPattern][selectedRow]
 			ensurePatternTrackModifiers(pt)
 			if pt.retrig[selectedColumn] ~= DEFAULT_RETRIG then
-				gfx.drawText("R:" .. pt.retrig[selectedColumn], STATUS_X, ROW_HEIGHT * 10)
+				gfx.drawText("Rtrg:" .. pt.retrig[selectedColumn], STATUS_X, ROW_HEIGHT * 10)
 			end
 			if pt.length[selectedColumn] ~= DEFAULT_LENGTH_LEVEL then
-				gfx.drawText("L:" .. pt.length[selectedColumn], STATUS_X, ROW_HEIGHT * 11)
+				gfx.drawText("Len:" .. pt.length[selectedColumn], STATUS_X, ROW_HEIGHT * 11)
 			end
 		end
 	elseif uiMode == "pattern" then
@@ -1193,7 +1210,7 @@ end
 local function projectToTable()
 	saveCurrentPatternFromTracks()
 	local proj = {
-		version           = 2,
+		version           = 3,
 		bpm               = bpmValue,
 		swing             = swingAmount,
 		chainEnabled      = chainEnabled,
@@ -1201,6 +1218,8 @@ local function projectToTable()
 		chains            = {},
 		currentChainIndex = currentChainIndex,
 		patterns          = {},
+		retrigs           = {},
+		lengths           = {},
 		trackVolumes      = {},
 		trackMutes        = {},
 		trackBankIndices  = {},
@@ -1217,10 +1236,17 @@ local function projectToTable()
 	end
 	for p = 1, MAX_PATTERNS do
 		proj.patterns[p] = {}
+		proj.retrigs[p] = {}
+		proj.lengths[p] = {}
 		for ti = 1, #tracks do
+			ensurePatternTrackModifiers(patterns[p][ti])
 			proj.patterns[p][ti] = {}
+			proj.retrigs[p][ti] = {}
+			proj.lengths[p][ti] = {}
 			for s = 1, NUM_STEPS do
 				proj.patterns[p][ti][s] = patterns[p][ti].notes[s]
+				proj.retrigs[p][ti][s] = patterns[p][ti].retrig[s]
+				proj.lengths[p][ti][s] = patterns[p][ti].length[s]
 			end
 		end
 	end
@@ -1230,10 +1256,10 @@ end
 local function projectFromTable(proj)
 	if not proj then return false end
 	bpmValue     = proj.bpm or 120
-	swingAmount  = proj.swing or 0.0   -- v1 saved 0 here always (bug); v2 saves raw float
+	swingAmount  = proj.swing or 0.0   -- v1 saved 0 here always; v2+ saves raw float
 	chainEnabled = proj.chainEnabled or false
 
-	-- Rebuild chains table with version migration
+	-- Rebuild chains table with version migration. v3 adds per-note modifiers.
 	if (proj.version or 1) >= 2 and proj.chains and #proj.chains > 0 then
 		chains = {}
 		for ci = 1, #proj.chains do
@@ -1277,6 +1303,12 @@ local function projectFromTable(proj)
 						end
 					end
 					ensurePatternTrackModifiers(patterns[p][ti])
+					for s = 1, NUM_STEPS do
+						local savedRetrig = proj.retrigs and proj.retrigs[p] and proj.retrigs[p][ti] and proj.retrigs[p][ti][s]
+						local savedLength = proj.lengths and proj.lengths[p] and proj.lengths[p][ti] and proj.lengths[p][ti][s]
+						patterns[p][ti].retrig[s] = normalizeRetrig(savedRetrig)
+						patterns[p][ti].length[s] = normalizeLengthLevel(savedLength)
+					end
 				end
 			end
 		end
@@ -1381,20 +1413,25 @@ local function projectToJSON(proj)
     lines[#lines+1] = '  "trackVolumes":     [' .. table.concat(volParts,   ', ') .. '],'
     lines[#lines+1] = '  "trackMutes":       [' .. table.concat(muteParts,  ', ') .. '],'
     lines[#lines+1] = '  "trackBankIndices": [' .. table.concat(bankParts,  ', ') .. '],'
-    lines[#lines+1] = '  "patterns": {'
-    for p = 1, MAX_PATTERNS do
-        local trackParts = {}
-        for ti = 1, #TRACK_NAMES do
-            local stepParts = {}
-            for s = 1, NUM_STEPS do
-                stepParts[#stepParts+1] = tostring(proj.patterns[p][ti][s])
-            end
-            trackParts[#trackParts+1] = '[' .. table.concat(stepParts, ',') .. ']'
-        end
-        local comma = (p < MAX_PATTERNS) and ',' or ''
-        lines[#lines+1] = '    "' .. p .. '": [' .. table.concat(trackParts, ', ') .. ']' .. comma
-    end
-    lines[#lines+1] = '  }'
+	local function appendPatternGrid(key, grid, trailingComma)
+		lines[#lines+1] = '  "' .. key .. '": {'
+		for p = 1, MAX_PATTERNS do
+			local trackParts = {}
+			for ti = 1, #TRACK_NAMES do
+				local stepParts = {}
+				for s = 1, NUM_STEPS do
+					stepParts[#stepParts+1] = tostring(grid[p][ti][s])
+				end
+				trackParts[#trackParts+1] = '[' .. table.concat(stepParts, ',') .. ']'
+			end
+			local comma = (p < MAX_PATTERNS) and ',' or ''
+			lines[#lines+1] = '    "' .. p .. '": [' .. table.concat(trackParts, ', ') .. ']' .. comma
+		end
+		lines[#lines+1] = '  }' .. (trailingComma and ',' or '')
+	end
+	appendPatternGrid('patterns', proj.patterns, true)
+	appendPatternGrid('retrigs', proj.retrigs, true)
+	appendPatternGrid('lengths', proj.lengths, false)
     lines[#lines+1] = '}'
     return table.concat(lines, '\n')
 end
@@ -1512,6 +1549,8 @@ local function projectFromJSON(jsonStr)
         trackMutes        = readBoolArray('trackMutes'),
         trackBankIndices  = readNumberArray('trackBankIndices'),
         patterns          = {},
+        retrigs           = {},
+        lengths           = {},
         chains            = {},
     }
 
@@ -1554,42 +1593,65 @@ local function projectFromJSON(jsonStr)
         proj.currentChainIndex = 1
     end
 
-    -- Parse patterns: "1": [[s,s,...], [s,s,...], ...], "2": [...], ...
-    -- Find the "patterns" object opening brace.
-    local _, patternsStart = jsonStr:find('"patterns"%s*:%s*{')
-    if patternsStart then
-        for p = 1, MAX_PATTERNS do
-            proj.patterns[p] = {}
-            -- Find "p": [ inside the patterns block
-            local _, patStart = jsonStr:find('"' .. p .. '"%s*:%s*%[', patternsStart)
-            if patStart then
-                -- Each track is a [...] array; collect MAX_TRACKS of them
-                local searchPos = patStart
-                for ti = 1, #TRACK_NAMES do
-                    local arrOpen = jsonStr:find('%[', searchPos)
-                    if not arrOpen then break end
-                    local arrClose = jsonStr:find('%]', arrOpen)
-                    local segment  = jsonStr:sub(arrOpen + 1, arrClose - 1)
-                    proj.patterns[p][ti] = {}
-                    for numStr in segment:gmatch('%-?%d+%.?%d*') do
-                        proj.patterns[p][ti][#proj.patterns[p][ti]+1] = tonumber(numStr)
-                    end
-                    searchPos = arrClose + 1
-                end
-            end
-            -- Fill any missing tracks with zeros
-            for ti = 1, #TRACK_NAMES do
-                if not proj.patterns[p][ti] then
-                    proj.patterns[p][ti] = {}
-                end
-                for s = 1, NUM_STEPS do
-                    if not proj.patterns[p][ti][s] then
-                        proj.patterns[p][ti][s] = 0
-                    end
-                end
-            end
-        end
-    end
+	local function objectSegment(key)
+		local _, objectStart = jsonStr:find('"' .. key .. '"%s*:%s*{')
+		if not objectStart then return nil end
+		local depth = 0
+		for i = objectStart, #jsonStr do
+			local ch = jsonStr:sub(i, i)
+			if ch == '{' then
+				depth = depth + 1
+			elseif ch == '}' then
+				depth = depth - 1
+				if depth == 0 then
+					return jsonStr:sub(objectStart, i)
+				end
+			end
+		end
+		return nil
+	end
+
+	local function readPatternGrid(key, defaultValue)
+		local grid = {}
+		local segment = objectSegment(key)
+		for p = 1, MAX_PATTERNS do
+			grid[p] = {}
+			local _, patStart = nil, nil
+			if segment then
+				_, patStart = segment:find('"' .. p .. '"%s*:%s*%[')
+			end
+			if patStart then
+				local searchPos = patStart
+				for ti = 1, #TRACK_NAMES do
+					local arrOpen = segment:find('%[', searchPos)
+					if not arrOpen then break end
+					local arrClose = segment:find('%]', arrOpen)
+					if not arrClose then break end
+					local stepSegment = segment:sub(arrOpen + 1, arrClose - 1)
+					grid[p][ti] = {}
+					for numStr in stepSegment:gmatch('%-?%d+%.?%d*') do
+						grid[p][ti][#grid[p][ti]+1] = tonumber(numStr)
+					end
+					searchPos = arrClose + 1
+				end
+			end
+			for ti = 1, #TRACK_NAMES do
+				if not grid[p][ti] then
+					grid[p][ti] = {}
+				end
+				for s = 1, NUM_STEPS do
+					if grid[p][ti][s] == nil then
+						grid[p][ti][s] = defaultValue
+					end
+				end
+			end
+		end
+		return grid
+	end
+
+	proj.patterns = readPatternGrid('patterns', 0)
+	proj.retrigs = readPatternGrid('retrigs', DEFAULT_RETRIG)
+	proj.lengths = readPatternGrid('lengths', DEFAULT_LENGTH_LEVEL)
 
     return proj
 end
@@ -2490,7 +2552,7 @@ local function cycleSelectedRetrig()
 	end
 	pt.retrig[selectedColumn] = nextRetrigValue(pt.retrig[selectedColumn] or DEFAULT_RETRIG)
 	refreshCurrentPatternTrack(track)
-	showModifierToast("R:" .. pt.retrig[selectedColumn], ROW_HEIGHT * 10)
+	showModifierToast("Rtrg:" .. pt.retrig[selectedColumn], ROW_HEIGHT * 10)
 	drawGrid()
 	if not isRunning then
 		track.inst:playMIDINote(60, LEVEL_INCREMENTS / LEVEL_INCREMENTS)
@@ -2510,7 +2572,7 @@ local function cycleSelectedLength()
 	end
 	pt.length[selectedColumn] = (pt.length[selectedColumn] or DEFAULT_LENGTH_LEVEL) % 5 + 1
 	refreshCurrentPatternTrack(track)
-	showModifierToast("L:" .. pt.length[selectedColumn], ROW_HEIGHT * 11)
+	showModifierToast("Len:" .. pt.length[selectedColumn], ROW_HEIGHT * 11)
 	drawGrid()
 	if not isRunning then
 		track.inst:playMIDINote(60, LEVEL_INCREMENTS / LEVEL_INCREMENTS)
@@ -2657,7 +2719,7 @@ function playdate.leftButtonDown()
 	if adjusting then
 		if selectedColumn > 0 then   -- only count when a step is selected
 			aLeftCount = aLeftCount + 1
-			cycleSelectedRetrig()
+			cycleSelectedLength()
 		end
 		return
 	
@@ -2691,7 +2753,7 @@ function playdate.rightButtonDown()
 	if adjusting then
 		if selectedColumn > 0 then   -- only count when a step is selected
 			aRightCount = aRightCount + 1
-			cycleSelectedLength()
+			cycleSelectedRetrig()
 		end
 		return
 	elseif moveGridCursor("right") then
