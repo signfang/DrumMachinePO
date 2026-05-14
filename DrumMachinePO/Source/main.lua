@@ -199,6 +199,9 @@ local NUM_STEPS        = 16
 local MAX_PATTERNS     = 18
 local SEQUENCE_SLOTS   = 2
 local BAR_LENGTH       = NUM_STEPS * STEP_SCALE
+local DEFAULT_RETRIG = 1
+local DEFAULT_LENGTH_LEVEL = 4
+local RETRIG_VALUES = { 1, 2, 3, 4, 6, 8 }
 
 local function toSequencerStep(gridSlot, slot)
 	return (slot - 1) * BAR_LENGTH + toInternalStep(gridSlot)
@@ -208,11 +211,43 @@ end
 -- MULTI-PATTERN STORAGE
 -- ============================================================
 
+local function makeDefaultStepArray(value)
+	local arr = {}
+	for s = 1, NUM_STEPS do arr[s] = value end
+	return arr
+end
+
+local function ensurePatternTrackModifiers(pt)
+	pt.retrig = pt.retrig or makeDefaultStepArray(DEFAULT_RETRIG)
+	pt.length = pt.length or makeDefaultStepArray(DEFAULT_LENGTH_LEVEL)
+	for s = 1, NUM_STEPS do
+		pt.retrig[s] = pt.retrig[s] or DEFAULT_RETRIG
+		pt.length[s] = pt.length[s] or DEFAULT_LENGTH_LEVEL
+	end
+end
+
+local function resetPatternTrackModifiers(pt)
+	pt.retrig = makeDefaultStepArray(DEFAULT_RETRIG)
+	pt.length = makeDefaultStepArray(DEFAULT_LENGTH_LEVEL)
+end
+
+local function copyPatternTrack(src, dest)
+	for s = 1, NUM_STEPS do
+		dest.notes[s] = src.notes[s]
+		dest.retrig[s] = src.retrig[s] or DEFAULT_RETRIG
+		dest.length[s] = src.length[s] or DEFAULT_LENGTH_LEVEL
+	end
+end
+
 patterns = {}
 for p = 1, MAX_PATTERNS do
 	patterns[p] = {}
 	for t = 1, #tracks do
-		patterns[p][t] = { notes = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0} }
+		patterns[p][t] = {
+			notes = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+			retrig = makeDefaultStepArray(DEFAULT_RETRIG),
+			length = makeDefaultStepArray(DEFAULT_LENGTH_LEVEL),
+		}
 	end
 end
 
@@ -414,16 +449,33 @@ local function getCurrentSequenceSlot()
 	return sequenceSlot
 end
 
-local function updateTrack(t, notes, logicalNotes, slot)
+local function lengthLevelToTicks(level)
+	level = math.max(1, math.min(5, level or DEFAULT_LENGTH_LEVEL))
+	return math.max(1, math.floor((STEP_SCALE * level / 5) + 0.5))
+end
+
+local function updateTrack(t, notes, logicalNotes, slot, retrigs, lengths)
 	local list = {}
 	for i = 1, #notes do
 		if notes[i] > 0 then
-			list[#list+1] = {
-				note     = 60,
-				step     = toSequencerStep(i, slot or activeSequenceSlot) + swingOffset(i),
-				length   = STEP_SCALE-3,   -- one grid step long
-				velocity = notes[i] / LEVEL_INCREMENTS
-			}
+			local retrig = retrigs and retrigs[i] or DEFAULT_RETRIG
+			local baseStep = toSequencerStep(i, slot or activeSequenceSlot) + swingOffset(i)
+			local rawLength = lengthLevelToTicks(lengths and lengths[i] or DEFAULT_LENGTH_LEVEL)
+
+			for r = 1, retrig do
+				local offset = math.floor((r - 1) * STEP_SCALE / retrig)
+				local nextOffset = (r < retrig) and math.floor(r * STEP_SCALE / retrig) or STEP_SCALE
+				local eventLength = rawLength
+				if retrig > 1 then
+					eventLength = math.min(rawLength, math.max(1, nextOffset - offset - 1))
+				end
+				list[#list+1] = {
+					note     = 60,
+					step     = baseStep + offset,
+					length   = eventLength,
+					velocity = notes[i] / LEVEL_INCREMENTS
+				}
+			end
 		end
 	end
 	t.buffers[slot or activeSequenceSlot].track:setNotes(list)
@@ -441,8 +493,12 @@ end
 -- Reapply swing to all tracks (called when swingAmount changes)
 local function applySwingToAllTracks()
 	for ti, tr in ipairs(tracks) do
-		updateTrack(tr, patterns[slotPatterns[1]][ti].notes, nil, 1)
-		updateTrack(tr, patterns[slotPatterns[2]][ti].notes, nil, 2)
+		local p1 = patterns[slotPatterns[1]][ti]
+		local p2 = patterns[slotPatterns[2]][ti]
+		ensurePatternTrackModifiers(p1)
+		ensurePatternTrackModifiers(p2)
+		updateTrack(tr, p1.notes, nil, 1, p1.retrig, p1.length)
+		updateTrack(tr, p2.notes, nil, 2, p2.retrig, p2.length)
 	end
 end
 
@@ -456,7 +512,9 @@ end
 
 local function loadPatternIntoLogicalTracks(patIdx)
 	for ti, tr in ipairs(tracks) do
-		local pnotes = patterns[patIdx][ti].notes
+		local ptrack = patterns[patIdx][ti]
+		ensurePatternTrackModifiers(ptrack)
+		local pnotes = ptrack.notes
 		local copy = {}
 		for s = 1, NUM_STEPS do copy[s] = pnotes[s] end
 		tr.notes = copy
@@ -478,12 +536,14 @@ local function loadPatternIntoSequence(patIdx, slot)
 	slotPatterns[slot] = patIdx
 
 	for ti = 1, #tracks do
-		local pnotes = patterns[patIdx][ti].notes
+		local ptrack = patterns[patIdx][ti]
+		ensurePatternTrackModifiers(ptrack)
+		local pnotes = ptrack.notes
 		local copy = {}
 		for s = 1, NUM_STEPS do
 			copy[s] = pnotes[s]
 		end
-		updateTrack(tracks[ti], copy, nil, slot)
+		updateTrack(tracks[ti], copy, nil, slot, ptrack.retrig, ptrack.length)
 	end
 end
 
@@ -804,6 +864,16 @@ local function drawCell(col, row)
 	gfx.setLineWidth(1)
 end
 local MAX_SAVE_SLOTS       = 8
+local modifierToastText = nil
+local modifierToastY = 0
+local modifierToastTimer = 0
+local MODIFIER_TOAST_FRAMES = 24
+
+local function showModifierToast(text, y)
+	modifierToastText = text
+	modifierToastY = y
+	modifierToastTimer = MODIFIER_TOAST_FRAMES
+end
 
 
 -- Pattern UI layout (all Y positions explicit, no derived overlaps)
@@ -1099,6 +1169,16 @@ function drawGrid()
 		
 		local chainTag2 = chainEnabled and "C:" .. currentChainIndex or ""
 		gfx.drawText(chainTag2, STATUS_X, ROW_HEIGHT*13)	
+		if selectedColumn > 0 and tracks[selectedRow].notes[selectedColumn] > 0 then
+			local pt = patterns[currentPattern][selectedRow]
+			ensurePatternTrackModifiers(pt)
+			if pt.retrig[selectedColumn] ~= DEFAULT_RETRIG then
+				gfx.drawText("R:" .. pt.retrig[selectedColumn], STATUS_X, ROW_HEIGHT * 10)
+			end
+			if pt.length[selectedColumn] ~= DEFAULT_LENGTH_LEVEL then
+				gfx.drawText("L:" .. pt.length[selectedColumn], STATUS_X, ROW_HEIGHT * 11)
+			end
+		end
 	elseif uiMode == "pattern" then
 		drawPatternUI()
 	end
@@ -1196,6 +1276,7 @@ local function projectFromTable(proj)
 							patterns[p][ti].notes[s] = proj.patterns[p][ti][s] or 0
 						end
 					end
+					ensurePatternTrackModifiers(patterns[p][ti])
 				end
 			end
 		end
@@ -2163,6 +2244,13 @@ function playdate.update()
 
 	processGridDPadRepeat()
 
+	if modifierToastTimer > 0 then
+		modifierToastTimer -= 1
+		if modifierToastTimer == 0 and uiMode == "grid" and not performanceMode then
+			drawGrid()
+		end
+	end
+
 	if isRunning and not sequence:isPlaying() then
 		sequence:play()
 	end
@@ -2280,6 +2368,7 @@ function playdate.update()
 						for s = 1, NUM_STEPS do
 							patterns[targetPat][ti].notes[s] = 0
 						end
+						resetPatternTrackModifiers(patterns[targetPat][ti])
 					end
 					if targetPat == currentPattern then
 						refreshLoadedPatternSlots(currentPattern)
@@ -2325,13 +2414,47 @@ local function trackIndex(track)
 	return nil
 end
 
+local function selectedPatternTrack()
+	local pt = patterns[currentPattern][selectedRow]
+	ensurePatternTrackModifiers(pt)
+	return pt
+end
+
+local function nextRetrigValue(value)
+	for i, v in ipairs(RETRIG_VALUES) do
+		if v == value then
+			return RETRIG_VALUES[(i % #RETRIG_VALUES) + 1]
+		end
+	end
+	return DEFAULT_RETRIG
+end
+
+local function refreshCurrentPatternTrack(track)
+	if not refreshLoadedPatternSlots(currentPattern) then
+		local ti = trackIndex(track)
+		local pt = ti and patterns[currentPattern][ti] or nil
+		if pt then
+			ensurePatternTrackModifiers(pt)
+			updateTrack(track, track.notes, nil, nil, pt.retrig, pt.length)
+		else
+			updateTrack(track, track.notes)
+		end
+	end
+end
+
 local function setTrackNote(track, pos, val)
 	track.notes[pos] = val
 	local ti = trackIndex(track)
-	if ti then patterns[currentPattern][ti].notes[pos] = val end
-	if not refreshLoadedPatternSlots(currentPattern) then
-		updateTrack(track, track.notes)
+	if ti then
+		local pt = patterns[currentPattern][ti]
+		ensurePatternTrackModifiers(pt)
+		pt.notes[pos] = val
+		if val == 0 then
+			pt.retrig[pos] = DEFAULT_RETRIG
+			pt.length[pos] = DEFAULT_LENGTH_LEVEL
+		end
 	end
+	refreshCurrentPatternTrack(track)
 	drawGrid()
 	-- SDK: instrument:playNote(note, volume, length, when)
 	-- Omitting length and when plays indefinitely until noteOff; that's fine for preview.
@@ -2351,6 +2474,46 @@ local function adjustSelectedNote(delta)
 	local val = track.notes[selectedColumn] + delta
 	if val >= 0 and val <= LEVEL_INCREMENTS then
 		setTrackNote(track, selectedColumn, val)
+	end
+end
+
+local function cycleSelectedRetrig()
+	if selectedColumn == 0 then return end
+	adjusted = true
+	local track = tracks[selectedRow]
+	local pt = selectedPatternTrack()
+	if track.notes[selectedColumn] == 0 then
+		track.notes[selectedColumn] = LEVEL_INCREMENTS
+		pt.notes[selectedColumn] = LEVEL_INCREMENTS
+		pt.retrig[selectedColumn] = DEFAULT_RETRIG
+		pt.length[selectedColumn] = DEFAULT_LENGTH_LEVEL
+	end
+	pt.retrig[selectedColumn] = nextRetrigValue(pt.retrig[selectedColumn] or DEFAULT_RETRIG)
+	refreshCurrentPatternTrack(track)
+	showModifierToast("R:" .. pt.retrig[selectedColumn], ROW_HEIGHT * 10)
+	drawGrid()
+	if not isRunning then
+		track.inst:playMIDINote(60, LEVEL_INCREMENTS / LEVEL_INCREMENTS)
+	end
+end
+
+local function cycleSelectedLength()
+	if selectedColumn == 0 then return end
+	adjusted = true
+	local track = tracks[selectedRow]
+	local pt = selectedPatternTrack()
+	if track.notes[selectedColumn] == 0 then
+		track.notes[selectedColumn] = LEVEL_INCREMENTS
+		pt.notes[selectedColumn] = LEVEL_INCREMENTS
+		pt.retrig[selectedColumn] = DEFAULT_RETRIG
+		pt.length[selectedColumn] = DEFAULT_LENGTH_LEVEL
+	end
+	pt.length[selectedColumn] = (pt.length[selectedColumn] or DEFAULT_LENGTH_LEVEL) % 5 + 1
+	refreshCurrentPatternTrack(track)
+	showModifierToast("L:" .. pt.length[selectedColumn], ROW_HEIGHT * 11)
+	drawGrid()
+	if not isRunning then
+		track.inst:playMIDINote(60, LEVEL_INCREMENTS / LEVEL_INCREMENTS)
 	end
 end
 
@@ -2494,7 +2657,7 @@ function playdate.leftButtonDown()
 	if adjusting then
 		if selectedColumn > 0 then   -- only count when a step is selected
 			aLeftCount = aLeftCount + 1
-			adjusted = true
+			cycleSelectedRetrig()
 		end
 		return
 	
@@ -2528,7 +2691,7 @@ function playdate.rightButtonDown()
 	if adjusting then
 		if selectedColumn > 0 then   -- only count when a step is selected
 			aRightCount = aRightCount + 1
-			adjusted = true
+			cycleSelectedLength()
 		end
 		return
 	elseif moveGridCursor("right") then
@@ -2667,9 +2830,9 @@ function playdate.AButtonUp()
 				if dest ~= src then
 					saveCurrentPatternFromTracks()
 					for ti = 1, #tracks do
-						for s = 1, NUM_STEPS do
-							patterns[dest][ti].notes[s] = patterns[src][ti].notes[s]
-						end
+						ensurePatternTrackModifiers(patterns[src][ti])
+						ensurePatternTrackModifiers(patterns[dest][ti])
+						copyPatternTrack(patterns[src][ti], patterns[dest][ti])
 					end
 					if dest == currentPattern then
 						refreshLoadedPatternSlots(currentPattern)
@@ -2697,6 +2860,7 @@ function playdate.AButtonUp()
 					for p = 1, MAX_PATTERNS do
 						for ti = 1, #tracks do
 							for s = 1, NUM_STEPS do patterns[p][ti].notes[s] = 0 end
+							resetPatternTrackModifiers(patterns[p][ti])
 						end
 					end
 					patterns[1][1].notes = { 9,0,0,0, 0,0,0,0, 0,0,6,0, 0,0,0,0 }
