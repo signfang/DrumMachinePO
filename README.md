@@ -39,7 +39,11 @@ Control info:
 
 D-PAD: Move around the grid. 
 
-A: Add/remove note. Hold A+up/down to adjust velocity of each notes. If the focus is on the track name (e.g. "KickDrum"), the A-button press will mute the selected track.
+A: Add/remove note. 
+ - Hold A+up/down to adjust velocity of each notes.
+ - Hold A+right to change the retrigger value (displayed as Rtrg: num). Cycles through 1-2-3-4-6-8.
+ - Hold A+left to change the note length value (displayed as Len: num). Cycles through 1-2-3-4-5. (4 is the default length)
+ - If the focus is on the track name (e.g. "KickDrum"), the A-button press will mute the selected track.
 
 B: Start/Stop playing. Double-tapping B while it's playing makes the play head go all the way to the first position.
 
