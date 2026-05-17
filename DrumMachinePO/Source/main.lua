@@ -1832,6 +1832,9 @@ local perfBitcrushParam = 0.0 -- 0=dry, 1=full crunch
 
 -- A double-tap state
 local perfLastATapMs = 0
+perfACrankUsed = false
+perfAResetFxIndex = nil
+perfDisplayFxIndex = nil
 
 -- B double-tap state (rewind)
 local perfLastBTapMs = 0
@@ -1878,6 +1881,40 @@ local function perfApplyFxCrank(dir)
 		perfBitcrusher:setAmount(perfBitcrushParam * 0.8)
 		perfBitcrusher:setUndersampling(perfBitcrushParam * 0.6)
 		perfBitcrusher:setMix(math.min(perfBitcrushParam * 2, 1.0))
+	end
+end
+
+function perfResetCurrentFx()
+	local fx = PERF_FX_NAMES[perfFxIndex]
+	if fx == "BPM" then
+		setBPM(120)
+	elseif fx == "Swing" then
+		swingAmount = 0.0
+		applySwingToAllTracks()
+	elseif fx == "Filter" then
+		perfFilterParam = 0
+		perfFilterLPF:setMix(0)
+		perfFilterHPF:setMix(0)
+	elseif fx == "Delay" then
+		perfReverbParam = 0.0
+		r:setMix(0)
+		r:setFeedback(0)
+	elseif fx == "Bitcrusher" then
+		perfBitcrushParam = 0.0
+		perfBitcrusher:setAmount(0)
+		perfBitcrusher:setUndersampling(0)
+		perfBitcrusher:setMix(0)
+	elseif fx == "No effects" then
+		perfFilterParam = 0
+		perfFilterLPF:setMix(0)
+		perfFilterHPF:setMix(0)
+		perfReverbParam = 0.0
+		r:setMix(0)
+		r:setFeedback(0)
+		perfBitcrushParam = 0.0
+		perfBitcrusher:setAmount(0)
+		perfBitcrusher:setUndersampling(0)
+		perfBitcrusher:setMix(0)
 	end
 end
 
@@ -2034,7 +2071,8 @@ drawPerformanceMode = function()
 	gfx.drawText(heldStr, 300, boxY + BOX_H + 20)
 
 	local playTag = isRunning and (perfStopAfterPattern and "STOP>" or "PLAY") or "STOP"
-	local fx = PERF_FX_NAMES[perfFxIndex]
+	local displayFxIndex = perfDisplayFxIndex or perfFxIndex
+	local fx = PERF_FX_NAMES[displayFxIndex]
 	local fxVal = ""
 	if fx == "BPM" then
 		fxVal = tostring(bpmValue)
@@ -2054,12 +2092,14 @@ drawPerformanceMode = function()
 	-- Button hints
 	gfx.drawLine(0, 155, 400, 155)
 	local firstLine = 157
-	local lineDist = 17
+	local lineDist = 16
+	local resetHint = fx == "No effects" and "ALL effects" or fx
+	local adjustHint = fx == "No effects" and "nothing" or fx
 	gfx.drawText("D-pad:play assigned pattern chains (queue)", 4, firstLine)
-	gfx.drawText("Double tap D-pad:play pattern chains (immediate)", 4, firstLine+lineDist)
-	gfx.drawText("D-pad hold + crank:re-assign pattern chains", 4, firstLine+lineDist*2)
-	gfx.drawText("A/AA:cycle fx, B:play/stop, BB:rewind", 4, firstLine+lineDist*3)
-	gfx.drawText("Crank:fx val, hold B:stop after ptn", 4, firstLine+lineDist*4)
+	gfx.drawText("D-pad x2:immediate, hold+crank:assign", 4, firstLine+lineDist)
+	gfx.drawText("A:next, AA:reset " .. resetHint .. ", A+crank:select", 4, firstLine+lineDist*2)
+	gfx.drawText("Crank:adjust " .. adjustHint, 4, firstLine+lineDist*3)
+	gfx.drawText("B:play/stop, BB:rewind, hold B:stop after ptn", 4, firstLine+lineDist*4)
 
 	gfx.unlockFocus()
 end
@@ -2197,27 +2237,38 @@ local function perfRightUp()
 	drawPerformanceMode()
 end
 
-local perfAPendingAdvance = false  -- a single tap is waiting to fire
-local perfALastDownMs = 0
-
 local function perfADown()
     perfStatus.held.a = true
-    perfALastDownMs = playdate.getCurrentTimeMilliseconds()
+    perfACrankUsed = false
 end
 
 local function perfAUp()
     perfStatus.held.a = false
     local now = playdate.getCurrentTimeMilliseconds()
+	if perfACrankUsed then
+		perfACrankUsed = false
+		perfLastATapMs = 0
+		perfAResetFxIndex = nil
+		perfDisplayFxIndex = nil
+		drawPerformanceMode()
+		return
+	end
     if (now - perfLastATapMs) < DOUBLE_TAP_A_MS then
-        -- Second tap released — cancel pending single tap, go back instead
-        perfAPendingAdvance = false
-        perfFxIndex = ((perfFxIndex - 2) % #PERF_FX_NAMES) + 1
+		if perfAResetFxIndex ~= nil then
+			perfFxIndex = perfAResetFxIndex
+		end
+        perfResetCurrentFx()
+        perfLastATapMs = 0
+        perfAResetFxIndex = nil
+        perfDisplayFxIndex = nil
         drawPerformanceMode()
     else
-        -- First tap released — don't act yet, wait to see if second tap comes
-        perfAPendingAdvance = true
+		perfAResetFxIndex = perfFxIndex
+		perfDisplayFxIndex = perfFxIndex
+        perfFxIndex = (perfFxIndex % #PERF_FX_NAMES) + 1
+        perfLastATapMs = now
+        drawPerformanceMode()
     end
-    perfLastATapMs = now
 end
 
 local function perfBDown()
@@ -2281,12 +2332,26 @@ local function perfCranked(change, acceleratedChange)
 			perfDirChain[perfHeldDir] = clamp(
 				perfDirChain[perfHeldDir] + dir2, 1, MAX_CHAINS)
 		end
+	elseif perfStatus.held.a then
+		local threshold = 20
+		if math.abs(perfCrankAccum) >= threshold then
+			local dir2 = perfCrankAccum > 0 and 1 or -1
+			perfCrankAccum = 0
+			perfACrankUsed = true
+			perfLastATapMs = 0
+			perfAResetFxIndex = nil
+			perfDisplayFxIndex = nil
+			perfFxIndex = ((perfFxIndex - 1 + dir2) % #PERF_FX_NAMES) + 1
+		end
 	else
 		-- Free crank: control active effect
 		local threshold = 30
 		if math.abs(perfCrankAccum) >= threshold then
 			local dir2 = perfCrankAccum > 0 and 1 or -1
 			perfCrankAccum = 0
+			perfLastATapMs = 0
+			perfAResetFxIndex = nil
+			perfDisplayFxIndex = nil
 			perfApplyFxCrank(dir2)
 		end
 	end
@@ -2385,10 +2450,10 @@ function playdate.update()
 	-- math.ceil maps internal steps 1..STEP_SCALE → grid 1, STEP_SCALE+1..2×STEP_SCALE → grid 2, etc.
 	local step = math.ceil(rawStepInBar / STEP_SCALE)
 	
-	if perfAPendingAdvance and playdate.getCurrentTimeMilliseconds() - perfLastATapMs >= DOUBLE_TAP_A_MS then
-		perfAPendingAdvance = false
-		perfFxIndex = (perfFxIndex % #PERF_FX_NAMES) + 1
-		drawPerformanceMode()
+	if perfAResetFxIndex ~= nil and playdate.getCurrentTimeMilliseconds() - perfLastATapMs >= DOUBLE_TAP_A_MS then
+		perfAResetFxIndex = nil
+		perfDisplayFxIndex = nil
+		if performanceMode then drawPerformanceMode() end
 	end
 
 	processGridDPadRepeat()
@@ -3326,6 +3391,9 @@ menu:addMenuItem("Performance", function()
 		perfFxIndex         = 1
 		perfFxDir           = 1
 		perfLastATapMs      = 0
+		perfACrankUsed      = false
+		perfAResetFxIndex   = nil
+		perfDisplayFxIndex  = nil
 		perfLastBTapMs      = 0
 		uiMode              = "grid"
 		drawPerformanceMode()
