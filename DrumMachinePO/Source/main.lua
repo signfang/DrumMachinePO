@@ -498,7 +498,7 @@ local function updateTrack(t, notes, logicalNotes, slot, retrigs, lengths)
 		end
 	end
 	t.buffers[slot or activeSequenceSlot].track:setNotes(list)
-	if slot == nil or slot == activeSequenceSlot then
+	if logicalNotes ~= false and (slot == nil or slot == activeSequenceSlot) then
 		t.notes = logicalNotes or notes   -- notes[] always holds integer velocities, never play positions
 	end
 end
@@ -516,20 +516,28 @@ local function applySwingToAllTracks()
 		local p2 = patterns[slotPatterns[2]][ti]
 		ensurePatternTrackModifiers(p1)
 		ensurePatternTrackModifiers(p2)
-		updateTrack(tr, p1.notes, nil, 1, p1.retrig, p1.length)
-		updateTrack(tr, p2.notes, nil, 2, p2.retrig, p2.length)
+		updateTrack(tr, p1.notes, false, 1, p1.retrig, p1.length)
+		updateTrack(tr, p2.notes, false, 2, p2.retrig, p2.length)
 	end
 end
 
+local logicalTracksPattern = 1
+local followPlaybackPattern = true
+
 local function saveCurrentPatternFromTracks()
+	local targetPattern = logicalTracksPattern or currentPattern
 	for ti = 1, #tracks do
 		for s = 1, NUM_STEPS do
-			patterns[currentPattern][ti].notes[s] = tracks[ti].notes[s]
+			patterns[targetPattern][ti].notes[s] = tracks[ti].notes[s]
 		end
 	end
 end
 
-local function loadPatternIntoLogicalTracks(patIdx)
+local function loadPatternIntoLogicalTracks(patIdx, shouldFollowPlayback)
+	if shouldFollowPlayback ~= nil then
+		followPlaybackPattern = shouldFollowPlayback
+	end
+	logicalTracksPattern = patIdx
 	for ti, tr in ipairs(tracks) do
 		local ptrack = patterns[patIdx][ti]
 		ensurePatternTrackModifiers(ptrack)
@@ -563,7 +571,7 @@ local function loadPatternIntoSequence(patIdx, slot, maxGridStep)
 		for s = 1, NUM_STEPS do
 			copy[s] = (maxGridStep and s > maxGridStep) and 0 or pnotes[s]
 		end
-		updateTrack(tracks[ti], copy, nil, slot, ptrack.retrig, ptrack.length)
+		updateTrack(tracks[ti], copy, false, slot, ptrack.retrig, ptrack.length)
 	end
 end
 
@@ -618,11 +626,20 @@ end
 
 local function switchToPattern(patIdx)
 	saveCurrentPatternFromTracks()
-	currentPattern = patIdx
 	if not isRunning then
+		currentPattern = patIdx
 		loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
-	elseif not refreshLoadedPatternSlots(currentPattern) then
-		loadPatternIntoSequence(currentPattern)
+		loadPatternIntoLogicalTracks(currentPattern, true)
+	else
+		local currentPlaybackSlot = getCurrentSequenceSlot()
+		currentPattern = patIdx
+		activeSequenceSlot = currentPlaybackSlot
+		for slot = 1, SEQUENCE_SLOTS do
+			loadPatternIntoSequence(currentPattern, slot)
+			slotChainIndices[slot] = currentChainIndex
+			slotChainSteps[slot] = chainStep
+		end
+		loadPatternIntoLogicalTracks(currentPattern, true)
 	end
 end
 
@@ -630,6 +647,7 @@ end
 -- playback/edit code works without changes. Safe to call at any time.
 local function switchToChain(idx)
 	saveCurrentPatternFromTracks()
+	followPlaybackPattern = true
 	currentChainIndex = math.max(1, math.min(MAX_CHAINS, idx))
 	chainList         = chains[currentChainIndex]
 	chainStep         = 1
@@ -949,7 +967,7 @@ local function drawPatternUI()
 		for p = 1, MAX_PATTERNS do
 			local x = PAT_START_X + (p-1) * (PAT_BOX_W + 4)
 			local y = PAT_BOXES_Y
-			local isCurrent  = (p == currentPattern)
+			local isCurrent  = (p == logicalTracksPattern)
 			local isSelected = (id == "patterns" and p == selectedPatternSlot)
 			local isCopySrc  = (patternCopyMode and p == patternCopySource)
 			gfx.setColor(gfx.kColorBlack)
@@ -1178,7 +1196,7 @@ function drawGrid()
 
 		elseif adjusting then
 			local swingTag = swingPct > 0 and ("SW:" .. swingPct .. "%") or ""
-			gfx.drawText("P:" .. currentPattern .. chainTag, STATUS_X, 0)
+			gfx.drawText("P:" .. logicalTracksPattern .. chainTag, STATUS_X, 0)
 			gfx.drawText("BPM", STATUS_X, ROW_HEIGHT)
 			gfx.drawText(":" .. bpmValue, STATUS_X, ROW_HEIGHT*2)
 			gfx.drawText(swingTag, STATUS_X, ROW_HEIGHT*3)		
@@ -1186,7 +1204,7 @@ function drawGrid()
 		else
 			local swingTag1 = swingPct > 0 and ("SW:") or ""
 			local swingTag2 = swingPct > 0 and (swingPct .. "%") or ""
-			gfx.drawText("P:" .. currentPattern .. chainTag, STATUS_X, 0)
+			gfx.drawText("P:" .. logicalTracksPattern .. chainTag, STATUS_X, 0)
 			gfx.drawText("BPM", STATUS_X, ROW_HEIGHT)
 			gfx.drawText(":" ..bpmValue, STATUS_X, ROW_HEIGHT*2)
 			gfx.drawText(swingTag1, STATUS_X, ROW_HEIGHT*3)			
@@ -1197,7 +1215,7 @@ function drawGrid()
 		local chainTag2 = chainEnabled and "C:" .. currentChainIndex or ""
 		gfx.drawText(chainTag2, STATUS_X, ROW_HEIGHT*13)	
 		if selectedColumn > 0 and tracks[selectedRow].notes[selectedColumn] > 0 then
-			local pt = patterns[currentPattern][selectedRow]
+			local pt = patterns[logicalTracksPattern][selectedRow]
 			ensurePatternTrackModifiers(pt)
 			if pt.retrig[selectedColumn] ~= DEFAULT_RETRIG then
 				gfx.drawText("Rtrg:" .. pt.retrig[selectedColumn], STATUS_X, ROW_HEIGHT * 10)
@@ -1327,6 +1345,7 @@ local function projectFromTable(proj)
 	currentPattern = 1
 	chainStep      = 1
 	loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
+	loadPatternIntoLogicalTracks(currentPattern, true)
 	return true
 end
 
@@ -2186,9 +2205,11 @@ local function perfBUp()
 	if isDouble then
 		-- Rewind to start of current chain
 		sequence:stop()
+		followPlaybackPattern = true
 		chainStep      = 1
 		currentPattern = chainList[1]
 		loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
+		loadPatternIntoLogicalTracks(currentPattern, true)
 		sequence:goToStep(1)
 		prevSequenceSlot = 1
 		prepareNextPatternBuffer()
@@ -2199,6 +2220,8 @@ local function perfBUp()
 		-- Start / stop
 		isRunning = not isRunning
 		if isRunning then
+			followPlaybackPattern = true
+			loadPatternIntoLogicalTracks(currentPattern, true)
 			updatePOSyncTrack()
 			updateMetronomeTrack()
 			prepareNextPatternBuffer()
@@ -2360,7 +2383,9 @@ function playdate.update()
 				chainEnabled = true
 				chainStep = slotChainSteps[activeSequenceSlot] or 1
 				currentPattern = slotPatterns[activeSequenceSlot] or chainList[chainStep]
-				loadPatternIntoLogicalTracks(currentPattern)
+				if followPlaybackPattern then
+					loadPatternIntoLogicalTracks(currentPattern)
+				end
 				perfPendingChainIdx = nil
 				perfPendingPreparedSlot = nil
 				perfPendingPreparedChainIdx = nil
@@ -2373,7 +2398,9 @@ function playdate.update()
 				chainStep = slotChainSteps[activeSequenceSlot] or chainStep
 				perfPendingPreparedSlot = nil
 				perfPendingPreparedChainIdx = nil
-				loadPatternIntoLogicalTracks(currentPattern)
+				if followPlaybackPattern then
+					loadPatternIntoLogicalTracks(currentPattern)
+				end
 				nextBufferNeedsPrepare = true
 			end
 			if performanceMode then drawPerformanceMode() else drawGrid() end
@@ -2389,7 +2416,9 @@ function playdate.update()
 				perfPendingPreparedSlot = nil
 				perfPendingPreparedChainIdx = nil
 			end
-			loadPatternIntoLogicalTracks(currentPattern)
+			if followPlaybackPattern then
+				loadPatternIntoLogicalTracks(currentPattern)
+			end
 			nextBufferNeedsPrepare = true
 		end
 	end
@@ -2482,7 +2511,9 @@ function playdate.update()
 					end
 					if targetPat == currentPattern then
 						refreshLoadedPatternSlots(currentPattern)
-						loadPatternIntoLogicalTracks(currentPattern)
+					end
+					if targetPat == logicalTracksPattern then
+						loadPatternIntoLogicalTracks(logicalTracksPattern, followPlaybackPattern)
 					end
 					showToast("Pattern " .. targetPat .. " cleared")
 				end
@@ -2525,7 +2556,7 @@ local function trackIndex(track)
 end
 
 local function selectedPatternTrack()
-	local pt = patterns[currentPattern][selectedRow]
+	local pt = patterns[logicalTracksPattern][selectedRow]
 	ensurePatternTrackModifiers(pt)
 	return pt
 end
@@ -2540,9 +2571,9 @@ local function nextRetrigValue(value)
 end
 
 local function refreshCurrentPatternTrack(track)
-	if not refreshLoadedPatternSlots(currentPattern) then
+	if not refreshLoadedPatternSlots(logicalTracksPattern) then
 		local ti = trackIndex(track)
-		local pt = ti and patterns[currentPattern][ti] or nil
+		local pt = ti and patterns[logicalTracksPattern][ti] or nil
 		if pt then
 			ensurePatternTrackModifiers(pt)
 			updateTrack(track, track.notes, nil, nil, pt.retrig, pt.length)
@@ -2556,7 +2587,7 @@ local function setTrackNote(track, pos, val)
 	track.notes[pos] = val
 	local ti = trackIndex(track)
 	if ti then
-		local pt = patterns[currentPattern][ti]
+		local pt = patterns[logicalTracksPattern][ti]
 		ensurePatternTrackModifiers(pt)
 		pt.notes[pos] = val
 		if val == 0 then
@@ -2647,6 +2678,7 @@ local function patternModeA()
 			chainStep = 1
 			currentPattern = chainList[1]
 			loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
+			followPlaybackPattern = true
 			sequence:goToStep(1)
 			prevSequenceSlot = 1
 			prepareNextPatternBuffer()
@@ -2658,7 +2690,7 @@ local function patternModeA()
 			uiMode = "grid"
 			drawGrid()
 		elseif selectedChainSlot == #chainList + 1 then
-			chainList[#chainList+1] = currentPattern
+			chainList[#chainList+1] = logicalTracksPattern
 			selectedChainSlot = #chainList
 			drawGrid()
 		else
@@ -2946,7 +2978,9 @@ function playdate.AButtonUp()
 					end
 					if dest == currentPattern then
 						refreshLoadedPatternSlots(currentPattern)
-						loadPatternIntoLogicalTracks(currentPattern)
+					end
+					if dest == logicalTracksPattern then
+						loadPatternIntoLogicalTracks(logicalTracksPattern, followPlaybackPattern)
 					end
 					showToast("P" .. src .. " copied to P" .. dest)
 				end
@@ -3006,6 +3040,7 @@ function playdate.AButtonUp()
 					setBPM(120)
 					currentPattern = 1
 					loadPatternIntoBothSequenceSlots(1, currentChainIndex, chainStep)
+					loadPatternIntoLogicalTracks(1, true)
 					showToast("Defaults restored")
 				end
 				drawGrid()
@@ -3087,6 +3122,7 @@ function playdate.BButtonUp()
 		lastBTapTime = now
 
 		if isDoubleTap then
+			followPlaybackPattern = true
 			activeSequenceSlot = 1
 			sequence:goToStep(1)
 			prevSequenceSlot = 1
@@ -3096,10 +3132,13 @@ function playdate.BButtonUp()
 				loadPatternIntoBothSequenceSlots(currentPattern, currentChainIndex, chainStep)
 				prepareNextPatternBuffer()
 			end
+			loadPatternIntoLogicalTracks(currentPattern, true)
 			drawGrid()
 		else
 			isRunning = not isRunning
 			if isRunning then
+				followPlaybackPattern = true
+				loadPatternIntoLogicalTracks(currentPattern, true)
 				updatePOSyncTrack()
 				updateMetronomeTrack()
 				prepareNextPatternBuffer()
@@ -3113,6 +3152,7 @@ function playdate.BButtonUp()
 				crankShadowSlot    = nil
 				loadPatternIntoSequence(currentPattern, activeSequenceSlot)
 				loadPatternIntoSequence(currentPattern, 3 - activeSequenceSlot)
+				loadPatternIntoLogicalTracks(currentPattern, true)
 			end
 		end
 	end
