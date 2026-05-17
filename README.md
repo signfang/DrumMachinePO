@@ -86,6 +86,10 @@ D-PAD:
 
 A: Cycle through "effects". BPM/Swing/Filter(LPF/HPF)/Bitcrusher/Delay
 
+- Crank: Adjust current FX
+- Hold A+Crank: scroll through FXs
+- Double-tap A: reset current FX (reset ALL FX if "no effects" is selected)
+
 B: Start/Stop playing, Double-tap to go all the way back.
 
 If "KEEP PERF FX" setting is on, FXs that are changed in the performance mode is also applied in the grid mode.
