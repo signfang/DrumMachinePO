@@ -19,6 +19,7 @@ It adds the following features on top of the DrumMachine example:
 4. BPM/Swing adjustment 
 5. Pocket Operator (e.g. PO-33 KO!) sync ability.
 6. User-defined samples (instead of built-in sounds, must be done while connected to PC and requires pre-compiling)
+7. Retriggers/Note length modifiers per note
 
 
 
@@ -90,7 +91,9 @@ A: Cycle through "effects". BPM/Swing/Filter(LPF/HPF)/Bitcrusher/Delay
 - Hold A+Crank: scroll through FXs
 - Double-tap A: reset current FX (reset ALL FX if "no effects" is selected)
 
-B: Start/Stop playing, Double-tap to go all the way back.
+B: Start/Stop playing
+- Double-tap B: go all the way back (rewind).
+- Hold B: queue the stop operation. Sequencer will stop after playing the current pattern.
 
 If "KEEP PERF FX" setting is on, FXs that are changed in the performance mode is also applied in the grid mode.
 
