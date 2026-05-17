@@ -33,6 +33,13 @@ perfKeepFx      = false   -- if true, performance effects persist after leaving 
 local perfStatus = {
 	held = { up=false, down=false, left=false, right=false, a=false, b=false },
 }
+perfBDownMs = 0
+perfBHoldConsumed = false
+perfStopAfterPattern = false
+local perfPendingChainIdx = nil
+local perfPendingPreparedSlot = nil
+local perfPendingPreparedChainIdx = nil
+local nextBufferNeedsPrepare = false
 -- Stop any voices that may be sustaining from the previous pattern.
 -- Called immediately after loadPatternIntoSequence on a chain advance.
 local function cutActiveVoices()
@@ -41,6 +48,23 @@ local function cutActiveVoices()
 			buffer.inst:allNotesOff()
 		end
     end
+end
+
+function clearPerformanceQueue()
+	perfPendingChainIdx = nil
+	perfPendingPreparedSlot = nil
+	perfPendingPreparedChainIdx = nil
+end
+
+function stopPerformanceAtPatternEnd(cutVoices)
+	isRunning = false
+	perfStopAfterPattern = false
+	sequence:stop()
+	if cutVoices then
+		cutActiveVoices()
+	end
+	clearPerformanceQueue()
+	nextBufferNeedsPrepare = true
 end
 -- ============================================================
 -- INTERNAL STEP RESOLUTION SCALING
@@ -169,6 +193,7 @@ local bUsedToExitPtn = false
 local lastBTapTime = 0
 local DOUBLE_TAP_MS = 300
 local DOUBLE_TAP_A_MS = 200
+LONG_PRESS_B_MS = 500
 
 -- Apply a track's volume/muted state to its synth.
 -- Base synth volume is 0.2; per-track volume scales on top.
@@ -453,6 +478,7 @@ local slotNeedsFullReload = { nil, nil }
 local prevSequenceSlot = 1
 local prepareNextPatternBuffer
 local PRELOAD_START_STEP = STEP_SCALE * 4
+PERF_STOP_WINDOW_STEP = BAR_LENGTH - math.max(1, math.floor(STEP_SCALE / 4))
 
 local function getSequencePosition()
 	local rawStep = sequence:getCurrentStep()
@@ -1762,9 +1788,9 @@ local perfHeldDir  = nil   -- "left"|"up"|"right"|"down" or nil
 
 -- Pending chain switch: set when user presses a dir mid-chain.
 -- Applied at the next bar boundary (step 16→1) in update().
-local perfPendingChainIdx = nil
-local perfPendingPreparedSlot = nil
-local perfPendingPreparedChainIdx = nil
+perfPendingChainIdx = nil
+perfPendingPreparedSlot = nil
+perfPendingPreparedChainIdx = nil
 local PERF_QUEUE_PRELOAD_START = PRELOAD_START_STEP
 local PERF_QUEUE_PRELOAD_END = BAR_LENGTH - STEP_SCALE * 3
 
@@ -1859,9 +1885,8 @@ end
 
 -- Switch performance chain immediately (start from step 1)
 local function perfSwitchChain(chainIdx)
-    perfPendingChainIdx = nil
-    perfPendingPreparedSlot = nil
-    perfPendingPreparedChainIdx = nil
+    perfStopAfterPattern = false
+    clearPerformanceQueue()
     currentChainIndex   = chainIdx
     chainList           = chains[chainIdx]
     chainEnabled        = true
@@ -2008,7 +2033,7 @@ drawPerformanceMode = function()
 	local heldStr = perfHeldDir and ("Hold:" .. perfHeldDir) or ""
 	gfx.drawText(heldStr, 300, boxY + BOX_H + 20)
 
-	local playTag = isRunning and "PLAY" or "STOP"
+	local playTag = isRunning and (perfStopAfterPattern and "STOP>" or "PLAY") or "STOP"
 	local fx = PERF_FX_NAMES[perfFxIndex]
 	local fxVal = ""
 	if fx == "BPM" then
@@ -2027,13 +2052,14 @@ drawPerformanceMode = function()
 	gfx.drawText(playTag .. "  FX >[" .. fx .. "] " .. fxVal, 4, boxY + BOX_H + 20)
 
 	-- Button hints
-	gfx.drawLine(0, 160, 400, 160)
-	local firstLine = 162
+	gfx.drawLine(0, 155, 400, 155)
+	local firstLine = 157
 	local lineDist = 17
 	gfx.drawText("D-pad:play assigned pattern chains (queue)", 4, firstLine)
 	gfx.drawText("Double tap D-pad:play pattern chains (immediate)", 4, firstLine+lineDist)
 	gfx.drawText("D-pad hold + crank:re-assign pattern chains", 4, firstLine+lineDist*2)
-	gfx.drawText("A/AA:cycle fx, B:play/stop, BB:rewind crank:fx val", 4, firstLine+lineDist*3)
+	gfx.drawText("A/AA:cycle fx, B:play/stop, BB:rewind", 4, firstLine+lineDist*3)
+	gfx.drawText("Crank:fx val, hold B:stop after ptn", 4, firstLine+lineDist*4)
 
 	gfx.unlockFocus()
 end
@@ -2196,14 +2222,24 @@ end
 
 local function perfBDown()
 	perfStatus.held.b = true
+	perfBDownMs = playdate.getCurrentTimeMilliseconds()
+	perfBHoldConsumed = false
 end
 local function perfBUp()
 	perfStatus.held.b = false
 	local now = playdate.getCurrentTimeMilliseconds()
+	local wasLongPress = isRunning and (now - perfBDownMs) >= LONG_PRESS_B_MS
+	if wasLongPress or perfBHoldConsumed then
+		perfStopAfterPattern = isRunning
+		perfBHoldConsumed = true
+		drawPerformanceMode()
+		return
+	end
 	local isDouble = (not isRunning) and (now - perfLastBTapMs) < DOUBLE_TAP_MS
 	perfLastBTapMs = now
 	if isDouble then
 		-- Rewind to start of current chain
+		perfStopAfterPattern = false
 		sequence:stop()
 		followPlaybackPattern = true
 		chainStep      = 1
@@ -2213,13 +2249,12 @@ local function perfBUp()
 		sequence:goToStep(1)
 		prevSequenceSlot = 1
 		prepareNextPatternBuffer()
-		perfPendingChainIdx = nil
-		perfPendingPreparedSlot = nil
-		perfPendingPreparedChainIdx = nil
+		clearPerformanceQueue()
 	else
 		-- Start / stop
 		isRunning = not isRunning
 		if isRunning then
+			perfStopAfterPattern = false
 			followPlaybackPattern = true
 			loadPatternIntoLogicalTracks(currentPattern, true)
 			updatePOSyncTrack()
@@ -2227,10 +2262,9 @@ local function perfBUp()
 			prepareNextPatternBuffer()
 			sequence:play()
 		else
+			perfStopAfterPattern = false
 			sequence:stop()
-			perfPendingChainIdx = nil
-			perfPendingPreparedSlot = nil
-			perfPendingPreparedChainIdx = nil
+			clearPerformanceQueue()
 		end
 	end
 	drawPerformanceMode()
@@ -2343,7 +2377,6 @@ end
 -- ============================================================
 
 local laststep = 0
-local nextBufferNeedsPrepare = false
 
 function playdate.update()
 	
@@ -2360,6 +2393,13 @@ function playdate.update()
 
 	processGridDPadRepeat()
 
+	if performanceMode and isRunning and perfStatus.held.b and not perfBHoldConsumed
+		and playdate.getCurrentTimeMilliseconds() - perfBDownMs >= LONG_PRESS_B_MS then
+		perfStopAfterPattern = true
+		perfBHoldConsumed = true
+		drawPerformanceMode()
+	end
+
 	if modifierToastTimer > 0 then
 		modifierToastTimer -= 1
 		if modifierToastTimer == 0 and uiMode == "grid" and not performanceMode then
@@ -2367,11 +2407,23 @@ function playdate.update()
 		end
 	end
 
+	if performanceMode and isRunning and perfStopAfterPattern and rawStepInBar >= PERF_STOP_WINDOW_STEP then
+		stopPerformanceAtPatternEnd(false)
+		drawPerformanceMode()
+	end
+
 	if isRunning and not sequence:isPlaying() then
 		sequence:play()
 	end
 
 	preparePendingPerformanceQueue(rawStepInBar)
+
+	if isRunning and sequenceSlot ~= prevSequenceSlot then
+		if performanceMode and perfStopAfterPattern then
+			stopPerformanceAtPatternEnd(true)
+			drawPerformanceMode()
+		end
+	end
 
 	if isRunning and sequenceSlot ~= prevSequenceSlot then
 		if performanceMode and perfPendingChainIdx ~= nil then
@@ -3267,9 +3319,9 @@ menu:addMenuItem("Performance", function()
 		-- Reset transient state
 		perfStatus.held     = { up=false, down=false, left=false, right=false, a=false, b=false }
 		perfHeldDir         = nil
-		perfPendingChainIdx = nil
-		perfPendingPreparedSlot = nil
-		perfPendingPreparedChainIdx = nil
+		perfStopAfterPattern = false
+		perfBHoldConsumed  = false
+		clearPerformanceQueue()
 		perfCrankAccum      = 0
 		perfFxIndex         = 1
 		perfFxDir           = 1
